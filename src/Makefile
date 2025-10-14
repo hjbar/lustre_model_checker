@@ -7,7 +7,7 @@ OCAMLBUILD= ocamlbuild -no-links -classic-display \
 TARGET=native
 MAIN=lmoch
 
-all: $(MAIN)
+all: $(MAIN) format
 
 native: TARGET := native
 native: all
@@ -27,6 +27,9 @@ $(MAIN): $(MAIN).target
 $(MAIN).target:
 	$(OCAMLBUILD) $(MAIN).$(TARGET)
 
+format:
+	find . -type d -name _build -prune -o \( -name "*.ml" -o -name "*.mli" \) -print \
+	| xargs -r ocamlformat --enable-outside-detected-project --no-comment-check --inplace
 
 clean:
 	ocamlbuild -classic-display -clean

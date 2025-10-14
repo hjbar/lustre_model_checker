@@ -1,5 +1,5 @@
 
-all: src/lmoch
+all: src/lmoch format
 
 src/lmoch: lib/aez-0.3/aez.cmxa FORCE
 	(cd src ; \
@@ -11,6 +11,10 @@ lib/aez-0.3/aez.cmxa:
 	 cd aez-0.3 ; \
 	 ./configure ; \
 	 $(MAKE))
+
+format:
+	find . -type d -name _build -prune -o \( -name "*.ml" -o -name "*.mli" \) -print \
+	| xargs -r ocamlformat --enable-outside-detected-project --no-comment-check --inplace
 
 clean:
 	(cd src; $(MAKE) clean)
