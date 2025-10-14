@@ -1,1 +1,0 @@
-# lustre_model_checker
