@@ -29,4 +29,3 @@ let print_to_string print x =
   Format.flush_str_formatter ()
 
 let string_of x = print_to_string print x
-

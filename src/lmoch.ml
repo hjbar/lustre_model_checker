@@ -1,4 +1,3 @@
-
 (* Programme principal *)
 
 open Format

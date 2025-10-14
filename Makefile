@@ -20,6 +20,6 @@ cleanall:
 	rm -f *~
 	(cd src; $(MAKE) cleanall)
 	(cd examples; $(MAKE) cleanall)
+	rm -rf lib/aez-0.3
 
 FORCE:
-
