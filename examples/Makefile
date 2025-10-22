@@ -1,10 +1,30 @@
-LMOCH=../src/lmoch
-
-FILE=ex001.lus
-NODE=check
+LMOCH = ../src/lmoch
+NODE = check
+LUS_FILES := $(wildcard *.lus)
 
 check:
-	$(LMOCH) $(FILE) $(NODE)
+	@for f in $(LUS_FILES); do \
+		echo "$$f :\n"; \
+		$(LMOCH) $$f $(NODE); \
+		echo "\n=====\n"; \
+	done
+
+cat:
+	@for f in $(LUS_FILES); do \
+		echo "$$f :\n"; \
+		cat $$f; \
+		echo "\n=====\n"; \
+	done
+
+compare:
+	@for f in $(LUS_FILES); do \
+		echo "$$f :\n"; \
+		cat $$f; \
+		echo "\n---\n"; \
+		$(LMOCH) $$f $(NODE); \
+		echo "\n=====\n"; \
+	done
+
 
 clean:
 

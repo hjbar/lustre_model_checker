@@ -85,6 +85,8 @@ let () =
     if main_node = "" then exit 0;
 
     (* XXX TODO XXX *)
+    Typed_ast_printer.print_node_list_std [ Inlining.inline ft main_node ];
+
     Format.printf "Don't know@.";
 
     exit 0
