@@ -1,0 +1,19 @@
+node incr (tictoc: bool) returns (n: int);
+let
+  n = if tictoc then 1 else 0;
+tel
+
+node update (tic: bool) returns (cpttmp, d: int);
+var t1, t2 : int;
+let
+  (t1, t2) = (incr(tic), (0 -> pre t2));
+  (d, cpttmp) = (t1, t2);
+tel
+
+node check (x: bool) returns (ok: bool);
+var n1, n2, cpt : int;
+let
+  (n1, n2) = update(x);
+  cpt = n1 + n2;
+  ok = true -> (pre cpt) <= cpt;
+tel
