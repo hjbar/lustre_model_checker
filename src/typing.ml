@@ -225,11 +225,10 @@ and type_expr_desc env loc = function
     (TE_op (Op_not, [ te ]), tt)
   | PE_op (Op_sub, [ e ]) ->
     let te = type_expr env e in
-    begin
-      match te.texpr_type with
-      | [ Tint ] -> (TE_op (Op_sub, [ te ]), [ Tint ])
-      | [ Treal ] -> (TE_op (Op_sub_f, [ te ]), [ Treal ])
-      | ty -> error e.pexpr_loc (ExpectedNum ty)
+    begin match te.texpr_type with
+    | [ Tint ] -> (TE_op (Op_sub, [ te ]), [ Tint ])
+    | [ Treal ] -> (TE_op (Op_sub_f, [ te ]), [ Treal ])
+    | ty -> error e.pexpr_loc (ExpectedNum ty)
     end
   | PE_op (Op_sub_f, [ e ]) ->
     let tt = [ Treal ] in
@@ -243,16 +242,15 @@ and type_expr_desc env loc = function
   | PE_op (((Op_add | Op_sub | Op_mul | Op_div) as op), [ e1; e2 ]) ->
     let te1 = type_expr env e1 in
     let te2 = type_expr env e2 in
-    begin
-      match (te1.texpr_type, te2.texpr_type) with
-      | [ Tint ], [ Tint ] -> (TE_op (op, [ te1; te2 ]), [ Tint ])
-      | [ (Tint | Treal) ], [ (Tint | Treal) ] ->
-        ( TE_op
-            ( real_op_of_int_op op,
-              [ real_expr_of_expr te1; real_expr_of_expr te2 ] ),
-          [ Treal ] )
-      | [ (Tint | Treal) ], ty -> error e2.pexpr_loc (ExpectedNum ty)
-      | ty, _ -> error e1.pexpr_loc (ExpectedNum ty)
+    begin match (te1.texpr_type, te2.texpr_type) with
+    | [ Tint ], [ Tint ] -> (TE_op (op, [ te1; te2 ]), [ Tint ])
+    | [ (Tint | Treal) ], [ (Tint | Treal) ] ->
+      ( TE_op
+          ( real_op_of_int_op op,
+            [ real_expr_of_expr te1; real_expr_of_expr te2 ] ),
+        [ Treal ] )
+    | [ (Tint | Treal) ], ty -> error e2.pexpr_loc (ExpectedNum ty)
+    | ty, _ -> error e1.pexpr_loc (ExpectedNum ty)
     end
   | PE_op (Op_mod, [ e1; e2 ]) ->
     let tt = [ Tint ] in
@@ -269,21 +267,19 @@ and type_expr_desc env loc = function
     let ty1 = te1.texpr_type in
     let te2 = type_expr env e2 in
     let ty2 = te2.texpr_type in
-    begin
-      match (ty1, ty2) with
-      | [ t1 ], [ t2 ] when t1 = t2 -> (TE_op (op, [ te1; te2 ]), [ Tbool ])
-      | _ -> error loc (Other "invalid operands to equality")
+    begin match (ty1, ty2) with
+    | [ t1 ], [ t2 ] when t1 = t2 -> (TE_op (op, [ te1; te2 ]), [ Tbool ])
+    | _ -> error loc (Other "invalid operands to equality")
     end
   | PE_op (((Op_lt | Op_le | Op_gt | Op_ge) as op), [ e1; e2 ]) ->
     let te1 = type_expr env e1 in
     let ty1 = te1.texpr_type in
     let te2 = type_expr env e2 in
     let ty2 = te2.texpr_type in
-    begin
-      match (ty1, ty2) with
-      | [ Tint ], [ Tint ] | [ Treal ], [ Treal ] ->
-        (TE_op (op, [ te1; te2 ]), [ Tbool ])
-      | _ -> error loc (Other "invalid operands to comparison")
+    begin match (ty1, ty2) with
+    | [ Tint ], [ Tint ] | [ Treal ], [ Treal ] ->
+      (TE_op (op, [ te1; te2 ]), [ Tbool ])
+    | _ -> error loc (Other "invalid operands to comparison")
     end
   | PE_op (Op_if, [ e1; e2; e3 ]) ->
     let te1 = expected_type env e1 [ Tbool ] in
@@ -320,10 +316,9 @@ and type_expr_desc env loc = function
       let tel = type_args env loc t_in el in
       let app_node = if is_prim then TE_prim (f, tel) else TE_app (f, tel) in
       ( app_node,
-        begin
-          match t_out with
-          | [] -> assert false
-          | _ -> t_out
+        begin match t_out with
+        | [] -> assert false
+        | _ -> t_out
         end )
     with Not_found -> error loc (UnboundNode f)
   end
@@ -424,9 +419,8 @@ let check_outputs loc env equs =
 
 
 let check_causality loc inputs equs =
-  begin
-    try ignore (Scheduling.schedule_equs inputs equs)
-    with Scheduling.Causality -> error loc Causality
+  begin try ignore (Scheduling.schedule_equs inputs equs)
+  with Scheduling.Causality -> error loc Causality
   end
 
 

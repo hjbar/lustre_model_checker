@@ -5,6 +5,7 @@ open Lexing
 open Lexer
 open Parser
 open Parse_ast
+open Typed_ast
 
 let usage = "usage: " ^ Sys.argv.(0) ^ " [options] file.lus main"
 
@@ -85,10 +86,9 @@ let () =
     if main_node = "" then exit 0;
 
     (* XXX TODO XXX *)
-    Typed_ast_printer.print_node_list_std [ Inlining.inline ft main_node ];
-
-    Format.printf "Don't know@.";
-
+    let main_node_inlined = Inlining.inline ft main_node in
+    Typed_ast_printer.print_node_list_std [ main_node_inlined ];
+    Model_checking.check main_node_inlined;
     exit 0
   with
   | Lexical_error s ->

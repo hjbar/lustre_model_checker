@@ -1,17 +1,17 @@
 (* Explication de l'in-lining :
 
-  On récupère le noeud main du programme lustre.
-  On veut in-liner à partir de ce noeud (car c'est celui-ci qu'on veut garder à la fin).
-  Ainsi, on regarde dans chaque équation du noeud main si une définition fait appel à un autre noeud.
-  Si c'est le cas, on veut remplacer l'appel au noeud par la définition de ce dernier.
-  Pour ce faire, ce noeud ne doit pas faire appel à d'autre noeud.
-  C'est pour cela que récursivement on in-line tous les appels également dans ce noeud.
-  Pour grandement simplifier les choses, on in-line tous les tuples de ce noeud.
-  À présent, on veut intégrer ce noeud dans notre noeud main: il ne doit comporter qu'une seule équation.
-  Ainsi, on veut in-liner toutes les définitions des variables locales dans la définition des outputs.
-  Et à présent, pour in-liner les outputs dans l'appelant, on combine toutes les équantions pour en former qu'une seule.
-  Ainsi, on forme un tuple avec tous les outputs : (o1, o2, ..., on) = (e1, e2, ..., en).
-  Ces outputs sont maintenant in-liné dans l'appelant: le job est fait.
+   On récupère le noeud main du programme lustre.
+   On veut in-liner à partir de ce noeud (car c'est celui-ci qu'on veut garder à la fin).
+   Ainsi, on regarde dans chaque équation du noeud main si une définition fait appel à un autre noeud.
+   Si c'est le cas, on veut remplacer l'appel au noeud par la définition de ce dernier.
+   Pour ce faire, ce noeud ne doit pas faire appel à d'autre noeud.
+   C'est pour cela que récursivement on in-line tous les appels également dans ce noeud.
+   Pour grandement simplifier les choses, on in-line tous les tuples de ce noeud.
+   À présent, on veut intégrer ce noeud dans notre noeud main: il ne doit comporter qu'une seule équation.
+   Ainsi, on veut in-liner toutes les définitions des variables locales dans la définition des outputs.
+   Et à présent, pour in-liner les outputs dans l'appelant, on combine toutes les équantions pour en former qu'une seule.
+   Ainsi, on forme un tuple avec tous les outputs : (o1, o2, ..., on) = (e1, e2, ..., en).
+   Ces outputs sont maintenant in-liné dans l'appelant: le job est fait.
 *)
 
 open Typed_ast
@@ -46,11 +46,10 @@ let get_outputs node =
 
 let get_local_equ output_id id equs =
   List.find_opt
-    begin
-      fun eqn ->
-        (* On sait qu'on a pas de tuples *)
-        let current_id = List.hd eqn.teq_patt.tpatt_desc in
-        current_id <> output_id && current_id = id
+    begin fun eqn ->
+      (* On sait qu'on a pas de tuples *)
+      let current_id = List.hd eqn.teq_patt.tpatt_desc in
+      current_id <> output_id && current_id = id
     end
     equs
 
@@ -77,6 +76,22 @@ let rec replace_ident old_id new_id e =
    Pré-condition : avoir in-liné tous les sous-noeuds *)
 
 let inline_tuple node =
+  let rec simpl expr =
+    let texpr_desc =
+      match expr.texpr_desc with
+      | TE_const c -> TE_const c
+      | TE_ident id -> TE_ident id
+      | TE_op (op, es) -> TE_op (op, List.map simpl es)
+      | TE_app (id, es) -> TE_app (id, List.map simpl es)
+      | TE_prim (id, es) -> TE_prim (id, List.map simpl es)
+      | TE_arrow (e1, e2) -> TE_arrow (simpl e1, simpl e2)
+      | TE_pre e -> TE_pre (simpl e)
+      | TE_tuple [ e ] -> (simpl e).texpr_desc
+      | TE_tuple es -> TE_tuple (List.map simpl es)
+    in
+    { expr with texpr_desc }
+  in
+
   let rec loop equs acc =
     match equs with
     | [] -> List.rev acc
@@ -97,16 +112,15 @@ let inline_tuple node =
 
         let new_equs =
           List.map2
-            begin
-              fun (id, ty) e ->
-                let tpatt_desc = [ id ] in
-                let tpatt_type = [ ty ] in
-                let tpatt_loc = equ.teq_patt.tpatt_loc in
-                let teq_patt = { tpatt_desc; tpatt_type; tpatt_loc } in
+            begin fun (id, ty) e ->
+              let tpatt_desc = [ id ] in
+              let tpatt_type = [ ty ] in
+              let tpatt_loc = equ.teq_patt.tpatt_loc in
+              let teq_patt = { tpatt_desc; tpatt_type; tpatt_loc } in
 
-                let teq_expr = e in
+              let teq_expr = e in
 
-                { teq_patt; teq_expr }
+              { teq_patt; teq_expr }
             end
             zip exprs
         in
@@ -115,7 +129,12 @@ let inline_tuple node =
     end
   in
 
-  let tn_equs = loop node.tn_equs [] in
+  let tn_equs =
+    List.map
+      (fun equ -> { equ with teq_expr = simpl equ.teq_expr })
+      node.tn_equs
+  in
+  let tn_equs = loop tn_equs [] in
   { node with tn_equs }
 
 
@@ -206,9 +225,9 @@ let inline_in_node node =
      puis on les renvoies sur la forme d'un tuple *)
   output_eqns
   |> List.map (fun eqn ->
-       (* On sait qu'on n'a pas de tuple *)
-       let teq_expr = replace (List.hd eqn.teq_patt.tpatt_desc) eqn.teq_expr in
-       { eqn with teq_expr } )
+    (* On sait qu'on n'a pas de tuple *)
+    let teq_expr = replace (List.hd eqn.teq_patt.tpatt_desc) eqn.teq_expr in
+    { eqn with teq_expr } )
   |> combine_outputs_equs node
 
 
@@ -321,4 +340,4 @@ let inline nodes main =
   | true ->
     let ht = hashtbl_from_nodes nodes in
     let main_node = Hashtbl.find ht main in
-    inline_from_node ht main_node
+    main_node |> inline_from_node ht |> inline_tuple
