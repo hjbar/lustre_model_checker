@@ -267,16 +267,30 @@ let get_base_case node delta p =
   let entails = BMC_solver.entails ~id:0 in
   let check = BMC_solver.check in
 
+  Format.printf "max_arrow_depth = %d\n%!" (max_arrow_depth node);
   let basecase_number = 1 + max_arrow_depth node in
+  Format.printf "basecase_number = %d\n%!" basecase_number;
 
   for i = 0 to basecase_number - 1 do
-    assume (delta (Term.make_int (Num.Int i)))
+    Format.printf "%dème base case\n%!" i;
+    let delta_i = delta (Term.make_int (Num.Int i)) in
+    Format.printf "Delta(%d) =\n%!" i;
+    Formula.print Format.std_formatter delta_i;
+    Format.printf "\n%!";
+    assume delta_i
   done;
   check ();
 
-  entails
-    (Formula.make Formula.And
-       (List.init basecase_number (fun i -> p (Term.make_int (Num.Int i)))) )
+  let ok_formula =
+    Formula.make Formula.And
+      (List.init basecase_number (fun i ->
+         Format.printf "%dème p case\n%!" i;
+         p (Term.make_int (Num.Int i)) ) )
+  in
+  Format.printf "OK =\n%!";
+  Formula.print Format.std_formatter ok_formula;
+  Format.printf "\n%!";
+  entails ok_formula
 
 
 (* ===== CAS INDUCTIF ===== *)

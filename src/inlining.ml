@@ -32,7 +32,8 @@ let hashtbl_from_nodes nodes =
   ht
 
 
-(* Renvoie les équations-outputs d'un noeud *)
+(* Renvoie les équations-outputs d'un noeud
+   Pré-condition: ne pas avoir de tuples dans les équations *)
 
 let get_outputs node =
   let output_ids = List.map fst node.tn_output in
