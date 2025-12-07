@@ -3,9 +3,9 @@ let
   cpt = (0 -> pre cpt) + if tic then 1 else 0;
 tel
 
-node check (x: bool) returns (ok: bool);
+node check (x: bool) returns (OK: bool);
 var cpt : int;
 let
   cpt = incr(x);
-  ok = true -> (pre cpt) <= cpt;
+  OK = true -> (pre cpt) <= cpt;
 tel

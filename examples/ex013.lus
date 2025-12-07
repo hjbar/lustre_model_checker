@@ -15,10 +15,10 @@ let
   (t1, t2) = (incr(tic), (0 -> pre t2));
 tel
 
-node check (x: bool) returns (ok: bool);
+node check (x: bool) returns (OK: bool);
 var n1, n2, cpt : int;
 let
-  ok = true -> (pre cpt) <= cpt;
+  OK = true -> (pre cpt) <= cpt;
   cpt = n1 + n2;
   (n1, n2) = update(x);
 tel

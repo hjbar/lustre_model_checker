@@ -49,7 +49,7 @@ let get_fresh_symbol =
   fun ty () ->
     incr cpt;
     let name = Format.sprintf "fresh_%d" !cpt in
-    declare_symbol name [ Type.type_int ] (asttype_to_smttype ty)
+    (name, declare_symbol name [ Type.type_int ] (asttype_to_smttype ty))
 
 
 (* Declare des symboles à partir d'un noeud *)
@@ -73,30 +73,39 @@ let get_symbols_from_node { tn_input; tn_output; tn_local; _ } :
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
 *)
 let rec get_formula_from_expr
-  (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr : Aez.Smt.Formula.t =
+  defs_aux (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
+  Aez.Smt.Formula.t =
   match expr.texpr_desc with
   | TE_op (Op_eq, es) ->
-    Formula.make_lit Formula.Eq (List.map (get_term_from_expr symbols n) es)
+    Formula.make_lit Formula.Eq
+      (List.map (get_term_from_expr defs_aux symbols n) es)
   | TE_op (Op_neq, es) ->
-    Formula.make_lit Formula.Neq (List.map (get_term_from_expr symbols n) es)
+    Formula.make_lit Formula.Neq
+      (List.map (get_term_from_expr defs_aux symbols n) es)
   | TE_op (Op_lt, es) ->
-    Formula.make_lit Formula.Lt (List.map (get_term_from_expr symbols n) es)
+    Formula.make_lit Formula.Lt
+      (List.map (get_term_from_expr defs_aux symbols n) es)
   | TE_op (Op_le, es) ->
-    Formula.make_lit Formula.Le (List.map (get_term_from_expr symbols n) es)
+    Formula.make_lit Formula.Le
+      (List.map (get_term_from_expr defs_aux symbols n) es)
   | TE_op (Op_gt, es) ->
     let expr = { expr with texpr_desc = TE_op (Op_le, es) } in
-    Formula.make Formula.Not [ get_formula_from_expr symbols n expr ]
+    Formula.make Formula.Not [ get_formula_from_expr defs_aux symbols n expr ]
   | TE_op (Op_ge, es) ->
     let expr = { expr with texpr_desc = TE_op (Op_lt, es) } in
-    Formula.make Formula.Not [ get_formula_from_expr symbols n expr ]
+    Formula.make Formula.Not [ get_formula_from_expr defs_aux symbols n expr ]
   | TE_op (Op_not, es) ->
-    Formula.make Formula.Not (List.map (get_formula_from_expr symbols n) es)
+    Formula.make Formula.Not
+      (List.map (get_formula_from_expr defs_aux symbols n) es)
   | TE_op (Op_and, es) ->
-    Formula.make Formula.And (List.map (get_formula_from_expr symbols n) es)
+    Formula.make Formula.And
+      (List.map (get_formula_from_expr defs_aux symbols n) es)
   | TE_op (Op_or, es) ->
-    Formula.make Formula.Or (List.map (get_formula_from_expr symbols n) es)
+    Formula.make Formula.Or
+      (List.map (get_formula_from_expr defs_aux symbols n) es)
   | TE_op (Op_impl, es) ->
-    Formula.make Formula.Imp (List.map (get_formula_from_expr symbols n) es)
+    Formula.make Formula.Imp
+      (List.map (get_formula_from_expr defs_aux symbols n) es)
   | _ ->
     Format.printf "Cash on this expression :@.";
     Typed_ast_printer.print_exp Format.std_formatter expr;
@@ -107,7 +116,8 @@ let rec get_formula_from_expr
 (* Renvoie un terme du SMT correspondant à une expression donnée
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
 *)
-and get_term_from_expr (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
+and get_term_from_expr
+  defs_aux (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
   Aez.Smt.Term.t =
   match expr.texpr_desc with
   | TE_const (Cbool false) -> Term.t_false
@@ -116,13 +126,14 @@ and get_term_from_expr (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
   | TE_const (Creal r) -> Term.make_real (Num.num_of_string (string_of_float r))
   | TE_ident { name; _ } -> Term.make_app (Hashtbl.find symbols name) [ n ]
   | TE_op ((Op_add | Op_add_f), es) ->
-    get_term_from_binop symbols n Term.Plus es
+    get_term_from_binop defs_aux symbols n Term.Plus es
   | TE_op ((Op_sub | Op_sub_f), es) ->
-    get_term_from_binop symbols n Term.Minus es
+    get_term_from_binop defs_aux symbols n Term.Minus es
   | TE_op ((Op_mul | Op_mul_f), es) ->
-    get_term_from_binop symbols n Term.Mult es
-  | TE_op ((Op_div | Op_div_f), es) -> get_term_from_binop symbols n Term.Div es
-  | TE_op (Op_mod, es) -> get_term_from_binop symbols n Term.Modulo es
+    get_term_from_binop defs_aux symbols n Term.Mult es
+  | TE_op ((Op_div | Op_div_f), es) ->
+    get_term_from_binop defs_aux symbols n Term.Div es
+  | TE_op (Op_mod, es) -> get_term_from_binop defs_aux symbols n Term.Modulo es
   | TE_op (Op_if, es) ->
     (* On suppose que es soit une liste a trois expressions *)
     let e1, es = (List.hd es, List.tl es) in
@@ -131,82 +142,102 @@ and get_term_from_expr (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
 
     Term.make_ite
       (Formula.make_lit Formula.Eq
-         [ get_term_from_expr symbols n e1; Term.t_true ] )
-      (get_term_from_expr symbols n e2)
-      (get_term_from_expr symbols n e3)
-  | TE_app ({ name; _ }, es) -> begin
-    try
-      Term.make_app
-        (Hashtbl.find symbols name)
-        (List.map (get_term_from_expr symbols n) es)
-    with _ ->
-      Format.printf "HERE\n%!";
-      Format.printf "try to call %s\n%!" name;
-      assert false
-  end
+         [ get_term_from_expr defs_aux symbols n e1; Term.t_true ] )
+      (get_term_from_expr defs_aux symbols n e2)
+      (get_term_from_expr defs_aux symbols n e3)
+  | TE_app ({ name; _ }, es) ->
+    Term.make_app
+      (Hashtbl.find symbols name)
+      (List.map (get_term_from_expr defs_aux symbols n) es)
   | TE_prim ({ name; _ }, es) -> failwith "TODO-MC-Op_prim"
   | TE_arrow (e1, e2) ->
     Term.make_ite
       (Formula.make_lit Formula.Eq [ n; Term.make_int (Num.Int 0) ])
-      (get_term_from_expr symbols n e1)
-      (get_term_from_expr symbols n e2)
+      (get_term_from_expr defs_aux symbols n e1)
+      (get_term_from_expr defs_aux symbols n e2)
   | TE_pre e ->
-    get_term_from_expr symbols
+    get_term_from_expr defs_aux symbols
       (Term.make_arith Term.Minus n (Term.make_int (Num.Int 1)))
       e
   | TE_op
       ( ( Op_eq | Op_neq | Op_lt | Op_le | Op_gt | Op_ge | Op_not | Op_and
         | Op_or | Op_impl ),
-        _ ) ->
-    Format.printf "Cash on this expression :@.";
-    Typed_ast_printer.print_exp Format.std_formatter expr;
-    Format.printf "\n%!";
-    failwith "We can't make a TERM form this expression\n%!"
-  | TE_tuple [ x ] ->
-    Format.printf "lolololoo\n%!";
-    assert false
+        es ) ->
+    let aux_name, aux = get_fresh_symbol Asttypes.Tbool () in
+    Hashtbl.replace symbols aux_name aux;
+    defs_aux := (aux, es) :: !defs_aux;
+    Term.make_app aux [ n ]
   | TE_tuple _ -> assert false
 
 
 (* Renvoie une formule du SMT correspondant à une expression binop donnée
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier et l'opération du SMT
 *)
-and get_term_from_binop symbols n op es =
+and get_term_from_binop defs_aux symbols n op es =
   match es with
   | [] | [ _ ] -> assert false
   | [ e1; e2 ] ->
     Term.make_arith op
-      (get_term_from_expr symbols n e1)
-      (get_term_from_expr symbols n e2)
+      (get_term_from_expr defs_aux symbols n e1)
+      (get_term_from_expr defs_aux symbols n e2)
   | e :: es ->
     Term.make_arith op
-      (get_term_from_expr symbols n e)
-      (get_term_from_binop symbols n op es)
+      (get_term_from_expr defs_aux symbols n e)
+      (get_term_from_binop defs_aux symbols n op es)
 
 
 (* Obtient une definition pour le SMT à partir d'un ensemble d'équations
    Pré-condition : ne pas avoir de tuples dans les équations
 *)
 let get_def_from_eqs symbols eqs : Aez.Smt.Term.t -> Aez.Smt.Formula.t =
+  let defs_aux = ref [] in
+
   let defs =
     List.map
       begin fun { teq_patt; teq_expr } ->
         let def_name = (List.hd teq_patt.tpatt_desc).name in
 
-        let def =
-         fun n ->
+        fun n ->
           Formula.make_lit Formula.Eq
             [
               Term.make_app (Hashtbl.find symbols def_name) [ n ];
-              get_term_from_expr symbols n teq_expr;
+              get_term_from_expr defs_aux symbols n teq_expr;
             ]
-        in
-
-        def
       end
       eqs
   in
-  fun n -> Formula.make Formula.And (List.map (fun def -> def n) defs)
+
+  let final_defs_aux = ref [] in
+  while !defs_aux <> [] do
+    let tmp_aux = ref [] in
+    List.iter
+      begin fun (aux, es) ->
+        let tmp_aux_intern = ref [] in
+        let def_aux =
+         fun n ->
+          let def_auxn =
+            Formula.make_lit Formula.Eq [ Term.make_app aux [ n ]; Term.t_true ]
+          in
+          let def_es =
+            es
+            |> List.map (get_formula_from_expr tmp_aux_intern symbols n)
+            |> Formula.make Formula.And
+          in
+          Formula.make Formula.And
+            [
+              Formula.make Formula.Imp [ def_auxn; def_es ];
+              Formula.make Formula.Imp [ def_es; def_auxn ];
+            ]
+        in
+        final_defs_aux := def_aux :: !final_defs_aux;
+        tmp_aux := !tmp_aux_intern @ !tmp_aux
+      end
+      !defs_aux;
+    defs_aux := !tmp_aux
+  done;
+
+  let final_defs = defs @ !final_defs_aux in
+  fun n -> Formula.make Formula.And (List.map (fun def -> def n) final_defs)
 
 
 (* Obtient la définition delta et p d'un noeud donné

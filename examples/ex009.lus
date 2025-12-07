@@ -8,10 +8,10 @@ let
   (d, cpttmp) = (incr(tic), (0 -> pre cpttmp));
 tel
 
-node check (x: bool) returns (ok: bool);
+node check (x: bool) returns (OK: bool);
 var n1, n2, cpt : int;
 let
   (n1, n2) = update(x);
   cpt = n1 + n2;
-  ok = true -> (pre cpt) <= cpt;
+  OK = true -> (pre cpt) <= cpt;
 tel

@@ -10,9 +10,9 @@ let
   cpttmp = (0 -> pre cpttmp) + d;
 tel
 
-node check (x: bool) returns (ok: bool);
+node check (x: bool) returns (OK: bool);
 var cpt : int;
 let
   cpt = update(x);
-  ok = true -> (pre cpt) <= cpt;
+  OK = true -> (pre cpt) <= cpt;
 tel
