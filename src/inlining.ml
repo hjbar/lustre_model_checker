@@ -336,9 +336,12 @@ and inline_from_node ht node =
 (* In-line les sous-noeuds dans le noeud principal *)
 
 let inline nodes main =
-  match have_to_inline nodes with
-  | false -> List.hd nodes
-  | true ->
-    let ht = hashtbl_from_nodes nodes in
-    let main_node = Hashtbl.find ht main in
-    main_node |> inline_from_node ht |> inline_tuple
+  let inlined_node =
+    match have_to_inline nodes with
+    | false -> List.hd nodes
+    | true ->
+      let ht = hashtbl_from_nodes nodes in
+      let main_node = Hashtbl.find ht main in
+      inline_from_node ht main_node
+  in
+  inline_tuple inlined_node

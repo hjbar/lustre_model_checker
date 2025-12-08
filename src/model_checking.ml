@@ -194,6 +194,10 @@ and get_term_from_expr (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
   | TE_ident { name; _ } -> Term.make_app (Hashtbl.find symbols name) [ n ]
   | TE_op ((Op_add | Op_add_f), es) ->
     get_term_from_binop symbols n Term.Plus es
+  | TE_op ((Op_sub | Op_sub_f), [ e ]) ->
+    Term.make_arith Term.Minus
+      (Term.make_int (Num.Int 1))
+      (get_term_from_expr symbols n e)
   | TE_op ((Op_sub | Op_sub_f), es) ->
     get_term_from_binop symbols n Term.Minus es
   | TE_op ((Op_mul | Op_mul_f), es) ->
@@ -401,6 +405,8 @@ let check node =
   let aux, node = preprocess_node node in
   let delta, p = get_defs_from_node aux node in
 
-  if not (get_base_case node delta p) then Format.printf "FALSE PROPERTY@."
-  else if get_ind_case delta p then Format.printf "TRUE PROPERTY@."
-  else Format.printf "Don't know@."
+  if not (get_base_case node delta p) then
+    Format.printf "\027[31mFALSE PROPERTY\027[0m@."
+  else if get_ind_case delta p then
+    Format.printf "\027[32mTRUE PROPERTY\027[0m@."
+  else Format.printf "\027[34mDon't know\027[0m@."

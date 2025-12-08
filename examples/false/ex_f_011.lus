@@ -7,5 +7,5 @@ node check (x: bool) returns (OK: bool);
 var cpt : int;
 let
   cpt = incr(x);
-  OK = true -> (pre cpt) <= cpt;
+  OK = true -> (pre cpt) > cpt;
 tel
