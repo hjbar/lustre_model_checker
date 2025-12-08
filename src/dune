@@ -1,0 +1,17 @@
+(ocamllex
+ (modules lexer))
+
+(ocamlyacc
+ (modules parser))
+
+(executable
+ (name lmoch)
+ (libraries aez))
+
+(env
+ (dev
+  (flags
+   (:standard -warn-error -A)))
+ (release
+  (flags
+   (:standard -warn-error -A))))

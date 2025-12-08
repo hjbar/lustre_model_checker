@@ -1,29 +1,32 @@
+all: install format build FORCE
 
-all: src/lmoch format
-
-src/lmoch: lib/aez-0.3/aez.cmxa FORCE
-	(cd src ; \
-	 $(MAKE))
-
-lib/aez-0.3/aez.cmxa:
-	(cd lib ; \
-	 tar xvfz aez-0.3.tar.gz ; \
-	 cd aez-0.3 ; \
-	 ./configure ; \
-	 $(MAKE))
-
-format:
-	find . -type d -name _build -prune -o \( -name "*.ml" -o -name "*.mli" \) -print \
-	| xargs -r ocamlformat --enable-outside-detected-project --no-comment-check --inplace
+install:
+	@mkdir -p lib
+ifeq ("$(wildcard lib/aez)","")
+	@cd targz && tar xvfz aez.tar.gz
+	@mv targz/aez lib/aez
+else
+endif
 
 clean:
-	(cd src; $(MAKE) clean)
-	(cd examples; $(MAKE) clean)
+	@rm -rf lmoch
+	@dune clean
 
-cleanall:
-	rm -f *~
-	(cd src; $(MAKE) cleanall)
-	(cd examples; $(MAKE) cleanall)
-	rm -rf lib/aez-0.3
+format:
+	@dune fmt
+
+build:
+	@dune build
+	@rm -rf lmoch
+	@cp _build/default/src/lmoch.exe lmoch
+
+fullclean: clean
+	@rm -rf lib/aez
+
+example: install format build clear
+	@cd examples && make -s
+
+clear:
+	clear
 
 FORCE:

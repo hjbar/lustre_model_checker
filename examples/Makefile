@@ -1,4 +1,4 @@
-LMOCH = ../src/lmoch
+LMOCH = ../lmoch
 NODE = check
 LUS_FILES := $(wildcard *.lus)
 
