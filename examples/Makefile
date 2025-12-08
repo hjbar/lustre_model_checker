@@ -1,32 +1,28 @@
-LMOCH = ../lmoch
-NODE = check
-LUS_FILES := $(wildcard *.lus)
+all: clear check
 
 check:
-	@for f in $(LUS_FILES); do \
-		echo "$$f :\n"; \
-		$(LMOCH) $$f $(NODE); \
-		echo "\n=====\n"; \
-	done
+	@echo "\n***** REQUIRE TRUE ******\n";
+	@cd true && make -s check
+	@echo "\n*************************\n";
+	@echo "\n***** REQUIRE FALSE *****\n";
+	@cd false && make -s check
+	@echo "\n*************************\n";
 
 cat:
-	@for f in $(LUS_FILES); do \
-		echo "$$f :\n"; \
-		cat $$f; \
-		echo "\n=====\n"; \
-	done
+	@echo "\n***** REQUIRE TRUE ******\n";
+	@cd true && make -s cat
+	@echo "\n*************************\n";
+	@echo "\n***** REQUIRE FALSE *****\n";
+	@cd false && make -s cat
+	@echo "\n*************************\n";
 
 compare:
-	@for f in $(LUS_FILES); do \
-		echo "$$f :\n"; \
-		cat $$f; \
-		echo "\n---\n"; \
-		$(LMOCH) $$f $(NODE); \
-		echo "\n=====\n"; \
-	done
+	@echo "\n***** REQUIRE TRUE ******\n";
+	@cd true && make -s compare
+	@echo "\n*************************\n";
+	@echo "\n***** REQUIRE FALSE *****\n";
+	@cd false && make -s compare
+	@echo "\n*************************\n";
 
-
-clean:
-
-cleanall: clean
-	rm -f *~
+clear:
+	clear
