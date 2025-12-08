@@ -3,9 +3,6 @@
 open Format
 open Lexing
 open Lexer
-open Parser
-open Parse_ast
-open Typed_ast
 
 let usage = "usage: " ^ Sys.argv.(0) ^ " [options] file.lus main"
 

@@ -23,7 +23,7 @@ build:
 fullclean: clean
 	@rm -rf lib/aez
 
-example: install format build clear
+example: all clear
 	@cd examples && make -s
 
 clear:
