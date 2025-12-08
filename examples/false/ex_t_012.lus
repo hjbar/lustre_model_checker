@@ -1,0 +1,7 @@
+node check () returns (OK : bool);
+var in1, in2 : int;
+let
+  in1 = 2;
+  in2 = 3;
+  OK = in1 + 1 < in2;
+tel

@@ -302,11 +302,13 @@ let rec preprocess_expr ({ texpr_desc; _ } as expr) :
   (string * Aez.Smt.Symbol.t * Typed_ast.t_expr) list * Typed_ast.t_expr =
   let aux, texpr_desc =
     match texpr_desc with
-    | _ when require_formula expr ->
+    | TE_op (op, es) when require_formula expr ->
+      let aux, es = es |> List.map preprocess_expr |> List.split in
+      let expr = { expr with texpr_desc = TE_op (op, es) } in
       let aux_name, aux_symbol = get_fresh_symbol Asttypes.Tbool () in
-      let aux = (aux_name, aux_symbol, expr) in
+      let aux_tuple = (aux_name, aux_symbol, expr) in
       let id = Ident.make aux_name Stream in
-      ([ aux ], TE_ident id)
+      (List.flatten ([ aux_tuple ] :: aux), TE_ident id)
     | TE_const _ | TE_ident _ -> ([], texpr_desc)
     | TE_op (op, es) ->
       let aux, es = es |> List.map preprocess_expr |> List.split in

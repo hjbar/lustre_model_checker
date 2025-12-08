@@ -1,0 +1,7 @@
+node check () returns (OK : bool);
+var in1 : real; in2 : int;
+let
+  in1 = 5.5;
+  in2 = int_of_real(in1) + 2;
+  OK = in2 = 7;
+tel

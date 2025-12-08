@@ -1,0 +1,27 @@
+node full_add(a, b, c : bool) returns (s, co : bool);
+let
+  s = (a <> b) <> c;
+  co = ((a and b) or (b and c)) or (a and c);
+tel;
+
+node half_add(a, b : bool) returns (s, co : bool);
+let
+  s = a <> b;
+  co = a and b;
+tel;
+
+node full_add_h(a, b, c : bool) returns (s, co : bool);
+var s1, c1, c2 : bool;
+let
+  (s1, c1) = half_add(a, b);
+  (s, c2) = half_add(c, s1);
+  co = c2 or c1;
+tel;
+
+node check(a, b, c : bool) returns (OK : bool);
+var s1, co1, s2, co2 : bool;
+let
+  (s1, co1) = full_add(a, b, c);
+  (s2, co2) = full_add_h(a, b, c);
+  OK = (not (s1 <> s2)) and (not (co1 <> co2));
+tel;

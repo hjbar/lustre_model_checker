@@ -1,0 +1,6 @@
+node check () returns (OK : bool);
+var in : int;
+let
+  in = 2;
+  OK = in - 2 = 0;
+tel

@@ -1,0 +1,4 @@
+node check () returns (OK : bool);
+let
+  OK = if (true and true and true and (false or true)) then false or false or true or false else true and true and true;
+tel
