@@ -196,7 +196,7 @@ and get_term_from_expr (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
     get_term_from_binop symbols n Term.Plus es
   | TE_op ((Op_sub | Op_sub_f), [ e ]) ->
     Term.make_arith Term.Minus
-      (Term.make_int (Num.Int 1))
+      (Term.make_int (Num.Int 0))
       (get_term_from_expr symbols n e)
   | TE_op ((Op_sub | Op_sub_f), es) ->
     get_term_from_binop symbols n Term.Minus es
@@ -280,6 +280,7 @@ let get_def_from_eqs symbols aux eqs : Aez.Smt.Term.t -> Aez.Smt.Formula.t =
   in
 
   let final_defs = defs @ defs_aux in
+
   fun n -> Formula.make Formula.And (List.map (fun def -> def n) final_defs)
 
 
@@ -375,6 +376,32 @@ let get_base_case node delta p =
   entails final_p
 
 
+(* Solveur cas de base k-inductif (a k fixe)*)
+
+let get_base_case_k_inductive delta p k =
+  let assume = BMC_solver.assume ~id:0 in
+  let entails = BMC_solver.entails ~id:0 in
+  let check = BMC_solver.check in
+
+  for i = 0 to k - 1 do
+    assume (delta (Term.make_int (Num.Int i)))
+  done;
+  check ();
+
+  let final_p =
+    match k with
+    | 1 -> p (Term.make_int (Num.Int 0))
+    | _ ->
+      let formula =
+        Formula.make Formula.And
+          (List.init k (fun i -> p (Term.make_int (Num.Int i))))
+      in
+      formula
+  in
+
+  entails final_p
+
+
 (* ===== CAS INDUCTIF ===== *)
 
 (* Notre solveur pour le cas inductif *)
@@ -398,10 +425,34 @@ let get_ind_case delta p =
   entails (p sn)
 
 
+(* Cas inductif pour k-induction (a k fixe)*)
+
+let get_ind_case_k_inductive delta p k =
+  let assume = IND_solver.assume ~id:0 in
+  let entails = IND_solver.entails ~id:0 in
+  let check = IND_solver.check in
+
+  let n = Term.make_app (declare_symbol "n" [] Type.type_int) [] in
+
+  assume (Formula.make_lit Formula.Le [ Term.make_int (Num.Int 0); n ]);
+  assume (delta n);
+  assume (p n);
+
+  for i = 1 to k + 1 do
+    assume (delta (Term.make_arith Term.Plus n (Term.make_int (Num.Int i))))
+  done;
+
+  for i = 1 to k do
+    assume (p (Term.make_arith Term.Plus n (Term.make_int (Num.Int i))))
+  done;
+  check ();
+  entails (p (Term.make_arith Term.Plus n (Term.make_int (Num.Int (k + 1)))))
+
+
 (* ===== CHECKING ===== *)
 
 (* Check si la propriété OK est vraie *)
-let check node =
+(* let check node =
   let aux, node = preprocess_node node in
   let delta, p = get_defs_from_node aux node in
 
@@ -409,4 +460,22 @@ let check node =
     Format.printf "\027[31mFALSE PROPERTY\027[0m@."
   else if get_ind_case delta p then
     Format.printf "\027[32mTRUE PROPERTY\027[0m@."
-  else Format.printf "\027[34mDon't know\027[0m@."
+  else Format.printf "\027[34mDon't know\027[0m@." *)
+
+let check node =
+  let k = 20 in
+  let aux, node = preprocess_node node in
+  let delta, p = get_defs_from_node aux node in
+
+  for i = 1 to k do
+    Format.printf "Checking k-inductive for k=%d@." i;
+    if not (get_base_case_k_inductive delta p i) then begin
+      Format.printf "\027[31mFALSE PROPERTY at base case k=%d\027[0m@." i;
+      exit 0
+    end
+    else if get_ind_case_k_inductive delta p i then begin
+      Format.printf "\027[32mTRUE PROPERTY at k=%d\027[0m@." i;
+      exit 0
+    end
+  done;
+  Format.printf "\027[34mDon't know after k=%d\027[0m@." k

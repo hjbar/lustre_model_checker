@@ -55,24 +55,6 @@ let get_local_equ output_id id equs =
     equs
 
 
-(* Remplace l'ident par un autre dans toute l'expression *)
-
-let rec replace_ident old_id new_id e =
-  let texpr_desc =
-    match e.texpr_desc with
-    | TE_ident id -> if id = old_id then TE_ident new_id else TE_ident id
-    | TE_const c -> TE_const c
-    | TE_op (op, es) -> TE_op (op, List.map (replace_ident old_id new_id) es)
-    | TE_app (f, args) -> TE_app (f, List.map (replace_ident old_id new_id) args)
-    | TE_prim (id, es) -> TE_prim (id, List.map (replace_ident old_id new_id) es)
-    | TE_arrow (e1, e2) ->
-      TE_arrow (replace_ident old_id new_id e1, replace_ident old_id new_id e2)
-    | TE_pre e -> TE_pre (replace_ident old_id new_id e)
-    | TE_tuple es -> TE_tuple (List.map (replace_ident old_id new_id) es)
-  in
-  { e with texpr_desc }
-
-
 (* Renvoie un noeud en inlinant tous les tuples
    Pré-condition : avoir in-liné tous les sous-noeuds *)
 
@@ -208,7 +190,7 @@ let inline_in_node node =
       | TE_ident id -> begin
         match get_local_equ output_id id node.tn_equs with
         | None -> TE_ident id
-        | Some eqn -> (replace_ident id output_id eqn.teq_expr).texpr_desc
+        | Some eqn -> (replace output_id eqn.teq_expr).texpr_desc
       end
       | TE_const c -> TE_const c
       | TE_op (op, es) -> TE_op (op, List.map (replace output_id) es)
@@ -232,11 +214,76 @@ let inline_in_node node =
   |> combine_outputs_equs node
 
 
+(* Renomme les variables locales pour éviter les collisions entre plusieurs appels inlinés *)
+let rename_locals node =
+  let counter = ref 0 in
+  let rename_id id =
+    incr counter;
+    Ident.make (Format.sprintf "%s__inl_%d" id.name !counter) id.kind
+  in
+
+  (* table de renaming uniquement pour les locaux *)
+  let local_map = Hashtbl.create 16 in
+  List.iter
+    (fun (lid, _) -> Hashtbl.replace local_map lid (rename_id lid))
+    node.tn_local;
+
+  let rename_ident_if_local id =
+    match Hashtbl.find_opt local_map id with
+    | Some nid -> nid
+    | None -> id
+  in
+
+  let rec rename_expr e =
+    let texpr_desc =
+      match e.texpr_desc with
+      | TE_ident id -> TE_ident (rename_ident_if_local id)
+      | TE_const c -> TE_const c
+      | TE_op (op, es) -> TE_op (op, List.map rename_expr es)
+      | TE_app (id, es) -> TE_app (id, List.map rename_expr es)
+      | TE_prim (id, es) -> TE_prim (id, List.map rename_expr es)
+      | TE_arrow (e1, e2) -> TE_arrow (rename_expr e1, rename_expr e2)
+      | TE_pre e -> TE_pre (rename_expr e)
+      | TE_tuple es -> TE_tuple (List.map rename_expr es)
+    in
+    { e with texpr_desc }
+  in
+
+  let rename_equ equ =
+    let tpatt_desc =
+      equ.teq_patt.tpatt_desc |> List.map rename_ident_if_local
+    in
+    let teq_expr = rename_expr equ.teq_expr in
+    let teq_patt =
+      {
+        tpatt_desc;
+        tpatt_type = equ.teq_patt.tpatt_type;
+        tpatt_loc = equ.teq_patt.tpatt_loc;
+      }
+    in
+    { teq_patt; teq_expr }
+  in
+
+  let tn_local =
+    List.map
+      (fun (id, ty) ->
+        match Hashtbl.find_opt local_map id with
+        | Some nid -> (nid, ty)
+        | None -> (id, ty) )
+      node.tn_local
+  in
+
+  let tn_equs = List.map rename_equ node.tn_equs in
+  { node with tn_local; tn_equs }
+
+
 (* Remplace les paramètres par les arguments *)
 
 let rec replace_expr ht left_ids f args =
   (* On récupère le noeud, on l'in-line récursivement les sous-noeuds, on in-line les tuples *)
   let node = Hashtbl.find ht f.name |> inline_from_node ht |> inline_tuple in
+
+  let node = rename_locals node in
 
   (* Pour remplacer efficacement les inputs par les arguments *)
   let mapping_input =
@@ -276,7 +323,7 @@ let rec replace_expr ht left_ids f args =
       | TE_arrow (e1, e2) -> TE_arrow (replace e1, replace e2)
       | TE_pre e -> TE_pre (replace e)
       | TE_tuple es -> TE_tuple (List.map replace es)
-      | TE_app (f, args) -> assert false
+      | TE_app (_, _) -> assert false
     in
     { e with texpr_desc }
   in
