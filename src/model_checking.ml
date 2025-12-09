@@ -12,6 +12,25 @@ let asttype_to_smttype = function
   | Asttypes.Treal -> Type.type_real
 
 
+(* Conversion d'un float OCaml en un Num.num
+   Took from StackOverflow
+   https://stackoverflow.com/questions/40219852/string-to-float-in-ocaml-over-and-under-approximation
+*)
+let num_of_float x =
+  let two = Num.num_of_int 2 in
+  let rec expand x =
+    let fr, wh = modf x in
+    Num.add_num
+      (Num.num_of_int (int_of_float wh))
+      ( if fr = 0.0 then Num.num_of_int 0
+        else Num.div_num (expand (2.0 *. fr)) two )
+  in
+  let fl, ex = frexp x in
+  if ex <> 0 then
+    Num.mult_num (expand fl) (Num.power_num two (Num.num_of_int ex))
+  else expand x
+
+
 (* Renvoie la profondeur maximale des -> *)
 let max_arrow_depth node =
   let rec calc_depth expr =
@@ -190,7 +209,7 @@ and get_term_from_expr (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
   | TE_const (Cbool false) -> Term.t_false
   | TE_const (Cbool true) -> Term.t_true
   | TE_const (Cint d) -> Term.make_int (Num.Int d)
-  | TE_const (Creal r) -> Term.make_real (Num.num_of_string (string_of_float r))
+  | TE_const (Creal r) -> Term.make_real (num_of_float r)
   | TE_ident { name; _ } -> Term.make_app (Hashtbl.find symbols name) [ n ]
   | TE_op ((Op_add | Op_add_f), es) ->
     get_term_from_binop symbols n Term.Plus es
@@ -213,9 +232,11 @@ and get_term_from_expr (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
     Term.make_app
       (Hashtbl.find symbols name)
       (List.map (get_term_from_expr symbols n) es)
-  | TE_prim ({ name; _ }, es) ->
-    ignore (name, es);
-    failwith "TODO-MC-Op_prim"
+  | TE_prim ({ name; _ }, es) when name = "int_of_real" ->
+    failwith "TODO-int_of_real"
+  | TE_prim ({ name; _ }, es) when name = "real_of_int" ->
+    failwith "TODO-real_of_int"
+  | TE_prim _ -> assert false
   | TE_arrow (e1, e2) ->
     Term.make_ite
       (Formula.make_lit Formula.Eq [ n; Term.make_int (Num.Int 0) ])
