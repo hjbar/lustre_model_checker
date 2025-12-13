@@ -68,19 +68,26 @@ let num_1 = Num.Int 1
 let num_2 = Num.Int 2
 
 (* Conversion d'un float OCaml en un Num.num
-   Took from StackOverflow
+   Importé depuis StackOverflow
    https://stackoverflow.com/questions/40219852/string-to-float-in-ocaml-over-and-under-approximation
+
+   expand consiste à convertir un nombre flottant en un développement binaire,
+   i.e. expand(x) = floor(x) + (expand (2 * frac(x)) / 2) si frac(x) <> 0, sinon 0
+
+   frexp nous donne une décomposition de x telle que x = fl * 2^ex avec fl un float OCaml
+   Maintenant on calcul expand(fl) * 2^ex avec expand qui converti fl en rationel Num
+   Si ex=0 alors x = fl * 2^0 = fl * 1 = fl donc on expand fl sans multiplier par 2^ex
 *)
 let num_of_float x =
   let rec expand x =
     let fr, wh = modf x in
     Num.add_num
-      (Num.num_of_int (int_of_float wh))
+      (Num.Int (int_of_float wh))
       (if fr = 0.0 then num_0 else Num.div_num (expand (2.0 *. fr)) num_2)
   in
   let fl, ex = frexp x in
   if ex <> 0 then Num.mult_num (expand fl) (Num.power_num num_2 (Num.Int ex))
-  else expand x
+  else expand fl
 
 
 (* Constante Num.num 0. *)
