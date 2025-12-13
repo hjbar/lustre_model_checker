@@ -1,0 +1,6 @@
+node check() returns (OK : bool);
+var in : real;
+let
+  in = -1.5;
+  OK = in = -1.5;
+tel;

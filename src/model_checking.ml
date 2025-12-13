@@ -12,25 +12,6 @@ let asttype_to_smttype = function
   | Asttypes.Treal -> Type.type_real
 
 
-(* Conversion d'un float OCaml en un Num.num
-   Took from StackOverflow
-   https://stackoverflow.com/questions/40219852/string-to-float-in-ocaml-over-and-under-approximation
-*)
-let num_of_float x =
-  let two = Num.num_of_int 2 in
-  let rec expand x =
-    let fr, wh = modf x in
-    Num.add_num
-      (Num.num_of_int (int_of_float wh))
-      ( if fr = 0.0 then Num.num_of_int 0
-        else Num.div_num (expand (2.0 *. fr)) two )
-  in
-  let fl, ex = frexp x in
-  if ex <> 0 then
-    Num.mult_num (expand fl) (Num.power_num two (Num.num_of_int ex))
-  else expand x
-
-
 (* Renvoie la profondeur maximale des -> *)
 let max_arrow_depth node =
   let rec calc_depth expr =
@@ -74,6 +55,62 @@ let assume_3 = function
   | [ e1; e2; e3 ] -> (e1, e2, e3)
   | _ -> assert false
 
+
+(* ===== NUM ===== *)
+
+(* Constante Num.num 0 *)
+let num_0 = Num.Int 0
+
+(* Constante Num.num 1 *)
+let num_1 = Num.Int 1
+
+(* Constante Num.num 2 *)
+let num_2 = Num.Int 2
+
+(* Conversion d'un float OCaml en un Num.num
+   Took from StackOverflow
+   https://stackoverflow.com/questions/40219852/string-to-float-in-ocaml-over-and-under-approximation
+*)
+let num_of_float x =
+  let rec expand x =
+    let fr, wh = modf x in
+    Num.add_num
+      (Num.num_of_int (int_of_float wh))
+      (if fr = 0.0 then num_0 else Num.div_num (expand (2.0 *. fr)) num_2)
+  in
+  let fl, ex = frexp x in
+  if ex <> 0 then Num.mult_num (expand fl) (Num.power_num num_2 (Num.Int ex))
+  else expand x
+
+
+(* ===== TERM ===== *)
+
+(* Constante Term 0 *)
+let term_0 = Term.make_int num_0
+
+(* Constante Term 1 *)
+let term_1 = Term.make_int num_1
+
+(* Addition entre deux termes *)
+let term_add t1 t2 = Term.make_arith Term.Plus t1 t2
+
+(* Soustraction entre deux termes *)
+let term_sub t1 t2 = Term.make_arith Term.Minus t1 t2
+
+(* Application f(x) *)
+let term_app f x = Term.make_app f [ x ]
+
+(* Égalité entre deux termes *)
+let formula_eq t1 t2 = Formula.make_lit Formula.Eq [ t1; t2 ]
+
+(* Conjonction entre deux formules *)
+let formula_and f1 f2 = Formula.make Formula.And [ f1; f2 ]
+
+(* Implication entre deux formules *)
+let formula_imp f1 f2 = Formula.make Formula.Imp [ f1; f2 ]
+
+(* Négation d'une formule *)
+let formula_not f = Formula.make Formula.Not [ f ]
 
 (* ===== SYMBOLES ===== *)
 
@@ -131,10 +168,10 @@ let rec get_formula_from_expr
   | TE_op (Op_le, es) -> get_formula_from_lit symbols n Formula.Le es
   | TE_op (Op_gt, es) ->
     let expr = { expr with texpr_desc = TE_op (Op_le, es) } in
-    Formula.make Formula.Not [ get_formula_from_expr symbols n expr ]
+    formula_not (get_formula_from_expr symbols n expr)
   | TE_op (Op_ge, es) ->
     let expr = { expr with texpr_desc = TE_op (Op_lt, es) } in
-    Formula.make Formula.Not [ get_formula_from_expr symbols n expr ]
+    formula_not (get_formula_from_expr symbols n expr)
   | TE_op (Op_not, es) -> get_formula_from_unop symbols n Formula.Not es
   | TE_op (Op_and, es) -> get_formula_from_binop symbols n Formula.And es
   | TE_op (Op_or, es) -> get_formula_from_binop symbols n Formula.Or es
@@ -154,11 +191,7 @@ and get_formula_from_unop symbols n op es =
   | e1 when require_formula e1 ->
     Formula.make op [ get_formula_from_expr symbols n e1 ]
   | e1 ->
-    Formula.make op
-      [
-        Formula.make_lit Formula.Eq
-          [ get_term_from_expr symbols n e1; Term.t_true ];
-      ]
+    Formula.make op [ formula_eq (get_term_from_expr symbols n e1) Term.t_true ]
 
 
 (* Renvoie une formule du SMT correspondant à une expression binop donnée
@@ -173,23 +206,19 @@ and get_formula_from_binop symbols n op es =
     Formula.make op
       [
         get_formula_from_expr symbols n e1;
-        Formula.make_lit Formula.Eq
-          [ get_term_from_expr symbols n e2; Term.t_true ];
+        formula_eq (get_term_from_expr symbols n e2) Term.t_true;
       ]
   | e1, e2 when require_formula e2 ->
     Formula.make op
       [
-        Formula.make_lit Formula.Eq
-          [ get_term_from_expr symbols n e1; Term.t_true ];
+        formula_eq (get_term_from_expr symbols n e1) Term.t_true;
         get_formula_from_expr symbols n e2;
       ]
   | e1, e2 ->
     Formula.make op
       [
-        Formula.make_lit Formula.Eq
-          [ get_term_from_expr symbols n e1; Term.t_true ];
-        Formula.make_lit Formula.Eq
-          [ get_term_from_expr symbols n e2; Term.t_true ];
+        formula_eq (get_term_from_expr symbols n e1) Term.t_true;
+        formula_eq (get_term_from_expr symbols n e2) Term.t_true;
       ]
 
 
@@ -210,13 +239,12 @@ and get_term_from_expr (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
   | TE_const (Cbool true) -> Term.t_true
   | TE_const (Cint d) -> Term.make_int (Num.Int d)
   | TE_const (Creal r) -> Term.make_real (num_of_float r)
-  | TE_ident { name; _ } -> Term.make_app (Hashtbl.find symbols name) [ n ]
+  | TE_ident { name; _ } -> term_app (Hashtbl.find symbols name) n
   | TE_op ((Op_add | Op_add_f), es) ->
     get_term_from_binop symbols n Term.Plus es
-  | TE_op ((Op_sub | Op_sub_f), [ e ]) ->
-    Term.make_arith Term.Minus
-      (Term.make_int (Num.Int 0))
-      (get_term_from_expr symbols n e)
+  | TE_op (Op_sub, [ e ]) -> term_sub term_0 (get_term_from_expr symbols n e)
+  | TE_op (Op_sub_f, [ e ]) ->
+    term_sub (Term.make_real (num_of_float 0.)) (get_term_from_expr symbols n e)
   | TE_op ((Op_sub | Op_sub_f), es) ->
     get_term_from_binop symbols n Term.Minus es
   | TE_op ((Op_mul | Op_mul_f), es) ->
@@ -227,30 +255,23 @@ and get_term_from_expr (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
     let d1, d2, d3 =
       es |> List.map (get_term_from_expr symbols n) |> assume_3
     in
-    Term.make_ite (Formula.make_lit Formula.Eq [ d1; Term.t_true ]) d2 d3
-  | TE_app ({ name; _ }, es) ->
-    Term.make_app
-      (Hashtbl.find symbols name)
-      (List.map (get_term_from_expr symbols n) es)
+    Term.make_ite (formula_eq d1 Term.t_true) d2 d3
   | TE_prim ({ name; _ }, es) when name = "int_of_real" ->
     failwith "TODO-int_of_real"
   | TE_prim ({ name; _ }, es) when name = "real_of_int" ->
     failwith "TODO-real_of_int"
   | TE_prim _ -> assert false
   | TE_arrow (e1, e2) ->
-    Term.make_ite
-      (Formula.make_lit Formula.Eq [ n; Term.make_int (Num.Int 0) ])
+    Term.make_ite (formula_eq n term_0)
       (get_term_from_expr symbols n e1)
       (get_term_from_expr symbols n e2)
-  | TE_pre e ->
-    get_term_from_expr symbols
-      (Term.make_arith Term.Minus n (Term.make_int (Num.Int 1)))
-      e
+  | TE_pre e -> get_term_from_expr symbols (term_sub n term_1) e
   | TE_op _ ->
     Format.printf "Cash on this expression :@.";
     Typed_ast_printer.print_exp Format.std_formatter expr;
     Format.printf "\n%!";
     failwith "We can't make a TERM form this expression\n%!"
+  | TE_app _ -> assert false
   | TE_tuple _ -> assert false
 
 
@@ -271,11 +292,9 @@ let get_def_from_eqs symbols aux eqs : Aez.Smt.Term.t -> Aez.Smt.Formula.t =
       begin fun { teq_patt; teq_expr } ->
         let def_name = (List.hd teq_patt.tpatt_desc).name in
         fun n ->
-          Formula.make_lit Formula.Eq
-            [
-              Term.make_app (Hashtbl.find symbols def_name) [ n ];
-              get_term_from_expr symbols n teq_expr;
-            ]
+          formula_eq
+            (term_app (Hashtbl.find symbols def_name) n)
+            (get_term_from_expr symbols n teq_expr)
       end
       eqs
   in
@@ -284,18 +303,13 @@ let get_def_from_eqs symbols aux eqs : Aez.Smt.Term.t -> Aez.Smt.Formula.t =
     List.map
       begin fun (_, symbol, expr) ->
         fun n ->
-         let aux_def =
-           Formula.make_lit Formula.Eq
-             [ Term.make_app symbol [ n ]; Term.t_true ]
-         in
+         let aux_def = formula_eq (term_app symbol n) Term.t_true in
 
          let expr_def = get_formula_from_expr symbols n expr in
 
-         Formula.make Formula.And
-           [
-             Formula.make Formula.Imp [ aux_def; expr_def ];
-             Formula.make Formula.Imp [ expr_def; aux_def ];
-           ]
+         formula_and
+           (formula_imp aux_def expr_def)
+           (formula_imp expr_def aux_def)
       end
       aux
   in
@@ -315,8 +329,7 @@ let get_defs_from_node aux ({ tn_equs; _ } as node) :
   let symbols = get_symbols_from_node aux node in
   let delta_def = get_def_from_eqs symbols aux tn_equs in
   let p_def n =
-    Formula.make_lit Formula.Eq
-      [ Term.make_app (Hashtbl.find symbols "OK") [ n ]; Term.t_true ]
+    formula_eq (term_app (Hashtbl.find symbols "OK") n) Term.t_true
   in
   (delta_def, p_def)
 
@@ -339,9 +352,6 @@ let rec preprocess_expr ({ texpr_desc; _ } as expr) :
     | TE_op (op, es) ->
       let aux, es = es |> List.map preprocess_expr |> List.split in
       (List.flatten aux, TE_op (op, es))
-    | TE_app (id, es) ->
-      let aux, es = es |> List.map preprocess_expr |> List.split in
-      (List.flatten aux, TE_app (id, es))
     | TE_prim (id, es) ->
       let aux, es = es |> List.map preprocess_expr |> List.split in
       (List.flatten aux, TE_prim (id, es))
@@ -352,6 +362,7 @@ let rec preprocess_expr ({ texpr_desc; _ } as expr) :
     | TE_pre e ->
       let aux, e = preprocess_expr e in
       (aux, TE_pre e)
+    | TE_app _ -> assert false
     | TE_tuple _ -> assert false
   in
   (aux, { expr with texpr_desc })
@@ -389,7 +400,7 @@ let get_base_case node delta p =
 
   let final_p =
     match basecase_number with
-    | 1 -> p (Term.make_int (Num.Int 0))
+    | 1 -> p term_0
     | _ ->
       Formula.make Formula.And
         (List.init basecase_number (fun i -> p (Term.make_int (Num.Int i))))
@@ -411,7 +422,7 @@ let get_base_case_k_inductive delta p k =
 
   let final_p =
     match k with
-    | 1 -> p (Term.make_int (Num.Int 0))
+    | 1 -> p term_0
     | _ ->
       let formula =
         Formula.make Formula.And
@@ -435,9 +446,9 @@ let get_ind_case delta p =
   let check = IND_solver.check in
 
   let n = Term.make_app (declare_symbol "n" [] Type.type_int) [] in
-  let sn = Term.make_arith Term.Plus n (Term.make_int (Num.Int 1)) in
+  let sn = term_add n term_1 in
 
-  assume (Formula.make_lit Formula.Le [ Term.make_int (Num.Int 0); n ]);
+  assume (Formula.make_lit Formula.Le [ term_0; n ]);
   assume (delta n);
   assume (delta sn);
   assume (p n);
@@ -455,19 +466,19 @@ let get_ind_case_k_inductive delta p k =
 
   let n = Term.make_app (declare_symbol "n" [] Type.type_int) [] in
 
-  assume (Formula.make_lit Formula.Le [ Term.make_int (Num.Int 0); n ]);
+  assume (Formula.make_lit Formula.Le [ term_0; n ]);
   assume (delta n);
   assume (p n);
 
   for i = 1 to k + 1 do
-    assume (delta (Term.make_arith Term.Plus n (Term.make_int (Num.Int i))))
+    assume (delta (term_add n (Term.make_int (Num.Int i))))
   done;
 
   for i = 1 to k do
-    assume (p (Term.make_arith Term.Plus n (Term.make_int (Num.Int i))))
+    assume (p (term_add n (Term.make_int (Num.Int i))))
   done;
   check ();
-  entails (p (Term.make_arith Term.Plus n (Term.make_int (Num.Int (k + 1)))))
+  entails (p (term_add n (Term.make_int (Num.Int (k + 1)))))
 
 
 (* ===== CHECKING ===== *)
