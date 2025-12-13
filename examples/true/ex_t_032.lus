@@ -1,0 +1,6 @@
+node check() returns (OK : bool);
+var in1 : int;
+let
+  in1 = 1;
+  OK = in1 * in1 = 1;
+tel;

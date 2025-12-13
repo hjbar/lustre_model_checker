@@ -97,6 +97,12 @@ let term_0f = Term.make_real num_0f
 (* Constante Term 1 *)
 let term_1 = Term.make_int num_1
 
+(* Créer le terme Term d *)
+let term_int d = Term.make_int (Num.Int d)
+
+(* Créer le terme Term f *)
+let term_real f = Term.make_real (num_of_float f)
+
 (* Addition entre deux termes *)
 let term_add t1 t2 = Term.make_arith Term.Plus t1 t2
 
@@ -255,8 +261,8 @@ and get_term_from_expr (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
   match expr.texpr_desc with
   | TE_const (Cbool false) -> Term.t_false
   | TE_const (Cbool true) -> Term.t_true
-  | TE_const (Cint d) -> Term.make_int (Num.Int d)
-  | TE_const (Creal r) -> Term.make_real (num_of_float r)
+  | TE_const (Cint d) -> term_int d
+  | TE_const (Creal r) -> term_real r
   | TE_ident { name; _ } -> term_app (Hashtbl.find symbols name) n
   | TE_op ((Op_add | Op_add_f), es) ->
     get_term_from_binop symbols n Term.Plus es
@@ -405,7 +411,7 @@ let get_base_case node delta p =
   let basecase_number = 1 + max_arrow_depth node in
 
   for i = 0 to basecase_number - 1 do
-    assume (delta (Term.make_int (Num.Int i)))
+    assume (delta (term_int i))
   done;
   check ();
 
@@ -414,7 +420,7 @@ let get_base_case node delta p =
     | 1 -> p term_0
     | _ ->
       Formula.make Formula.And
-        (List.init basecase_number (fun i -> p (Term.make_int (Num.Int i))))
+        (List.init basecase_number (fun i -> p (term_int i)))
   in
   entails final_p
 
@@ -427,16 +433,14 @@ let get_base_case_k_inductive delta p k =
   let check = BMC_solver.check in
 
   for i = 0 to k - 1 do
-    assume (delta (Term.make_int (Num.Int i)))
+    assume (delta (term_int i))
   done;
   check ();
 
   let final_p =
     match k with
     | 1 -> p term_0
-    | _ ->
-      Formula.make Formula.And
-        (List.init k (fun i -> p (Term.make_int (Num.Int i))))
+    | _ -> Formula.make Formula.And (List.init k (fun i -> p (term_int i)))
   in
 
   entails final_p
@@ -479,14 +483,14 @@ let get_ind_case_k_inductive delta p k =
   assume (p n);
 
   for i = 1 to k + 1 do
-    assume (delta (n +@ Term.make_int (Num.Int i)))
+    assume (delta (n +@ term_int i))
   done;
 
   for i = 1 to k do
-    assume (p (n +@ Term.make_int (Num.Int i)))
+    assume (p (n +@ term_int i))
   done;
   check ();
-  entails (p (n +@ Term.make_int (Num.Int (k + 1))))
+  entails (p (n +@ term_int (k + 1)))
 
 
 (* ===== CHECKING ===== *)
