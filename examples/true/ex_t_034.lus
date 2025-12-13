@@ -1,0 +1,19 @@
+node RisingEdge( X: bool ) returns ( Y: bool );
+let
+  Y = false -> X and not pre X;
+tel
+
+node FallingEdge( X: bool ) returns ( Y: bool );
+let
+ Y = false -> not X and pre X;
+tel
+
+node FallingEdge2( X: bool ) returns ( Y: bool );
+let
+  Y = RisingEdge(not X);
+tel
+
+node check(X: bool) returns(OK: bool);
+let
+  OK =  FallingEdge(X) = FallingEdge2(X);
+tel

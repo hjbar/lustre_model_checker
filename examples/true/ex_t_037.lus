@@ -1,0 +1,44 @@
+node Switch( Set, Reset, Init : bool ) returns ( X : bool );
+let
+    X =      if Set then true
+        else if Reset then false
+        else (Init -> pre X);
+tel
+
+node First( X : bool ) returns ( Y : bool );
+let
+  Y = X -> pre Y;
+tel
+
+node Sofar( X : bool ) returns ( Y : bool );
+let
+  Y = X -> (X and (pre Y));
+tel
+
+node Since( X, Y : bool ) returns ( Z : bool );
+let
+  Z = X or (Y and (false -> pre Z));
+tel
+
+node check( Set, Reset, Reset2, Init : bool ) returns ( OK : bool ) ;
+var X, R1, R2, R3, R4, R5, R6, R7 : bool;
+let
+  X = Switch( Set, Reset, Init ) ;
+
+  R1 = Set => X ;  -- not Set or X;
+
+  R2 = (not Set and Reset) => not X ;
+
+  R3 = true -> ((not Set and not Reset) => X = pre X) ;
+
+  R4 = Set => Switch(Set, Reset, Init) = Switch(Set, Reset2, Init) ;
+
+
+  R5 = Since( Set, not Reset ) => X ;
+
+  R6 = Since( Reset and not Set, not Set ) => not X ;
+
+  R7 = Sofar( not Set and not Reset ) =>  (X = First(Init));
+
+  OK = R1 and R2 and R3 and R4 and R5 and R6 and R7;
+tel

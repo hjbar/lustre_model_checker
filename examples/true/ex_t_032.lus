@@ -1,6 +1,6 @@
-node check() returns (OK : bool);
-var in1 : int;
+node check(x : real) returns (OK : bool);
+var y : real;
 let
-  in1 = 1;
-  OK = in1 * in1 = 1;
-tel;
+  y = if (x >= 0.0) then x else -x;
+  OK = y >= 0.0;
+tel

@@ -1,0 +1,38 @@
+node SwitchInt( Set : bool; X : int )
+returns ( Y : int );
+let
+  Y = if Set then X else (0 -> pre Y);
+tel
+
+node Sofar( X : bool )
+returns ( Y : bool );
+let
+  Y = X and (true -> pre Y);
+tel
+
+node First( X : int )
+returns ( a : int );
+let
+  a = X -> pre a;
+tel
+
+node Since( X, Y : bool )
+returns ( SinceXY : bool );
+let
+  SinceXY = X or (Y and (false -> pre SinceXY));
+tel
+
+node SinceIncl( X, Y : bool )
+returns ( SinceXY : bool );
+let
+  SinceXY = Y and (X or (false -> pre SinceXY));
+tel
+
+node check( Set : bool; X : int; A : int ) returns ( OK : bool );
+var Y : int; a : int;
+let
+  a = First( A );
+  Y = SwitchInt( Set, X );
+
+  OK = Since( Set and X = a, not Set ) => Y = a;
+tel

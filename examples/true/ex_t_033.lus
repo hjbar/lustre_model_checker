@@ -1,0 +1,14 @@
+node s() returns (X: int);
+let
+  X = 1 -> if (pre X) < 3 then (pre X) + 1 else 3 ;
+tel
+
+node s1() returns (X:  int);
+let
+  X = 1 -> pre (2 -> 3);
+tel
+
+node check() returns (OK: bool);
+let
+  OK = (s() = s1());
+tel

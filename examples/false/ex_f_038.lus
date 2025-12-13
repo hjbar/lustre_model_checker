@@ -1,0 +1,11 @@
+node N(I, X: int) returns (Z: int);
+let
+  Z = if I > 0 then I + 2 else I + X;
+tel
+
+node check(X1, X2: int) returns (OK: bool);
+var I : int;
+let
+  I = 0;
+  OK =  N(I,X1) = N(I,X2);
+tel
