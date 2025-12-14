@@ -222,7 +222,7 @@ and get_formula_from_unop symbols n op es =
   match assume_1 es with
   | e1 when require_formula e1 ->
     Formula.make op [ get_formula_from_expr symbols n e1 ]
-  | e1 -> Formula.make op [ get_term_from_expr symbols n e1 =@ Term.t_true ]
+  | e1 -> Formula.make op [ get_term_from_expr 0 symbols n e1 =@ Term.t_true ]
 
 
 (* Renvoie une formule du SMT correspondant à une expression binop donnée
@@ -237,19 +237,19 @@ and get_formula_from_binop symbols n op es =
     Formula.make op
       [
         get_formula_from_expr symbols n e1;
-        get_term_from_expr symbols n e2 =@ Term.t_true;
+        get_term_from_expr 0 symbols n e2 =@ Term.t_true;
       ]
   | e1, e2 when require_formula e2 ->
     Formula.make op
       [
-        get_term_from_expr symbols n e1 =@ Term.t_true;
+        get_term_from_expr 0 symbols n e1 =@ Term.t_true;
         get_formula_from_expr symbols n e2;
       ]
   | e1, e2 ->
     Formula.make op
       [
-        get_term_from_expr symbols n e1 =@ Term.t_true;
-        get_term_from_expr symbols n e2 =@ Term.t_true;
+        get_term_from_expr 0 symbols n e1 =@ Term.t_true;
+        get_term_from_expr 0 symbols n e2 =@ Term.t_true;
       ]
 
 
@@ -257,13 +257,14 @@ and get_formula_from_binop symbols n op es =
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
 *)
 and get_formula_from_lit symbols n op es =
-  Formula.make_lit op (List.map (get_term_from_expr symbols n) es)
+  Formula.make_lit op (List.map (get_term_from_expr 0 symbols n) es)
 
 
 (* Renvoie un terme du SMT correspondant à une expression donnée
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
 *)
-and get_term_from_expr (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
+and get_term_from_expr
+  arr_length (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
   Aez.Smt.Term.t =
   match expr.texpr_desc with
   | TE_const (Cbool false) -> Term.t_false
@@ -273,8 +274,8 @@ and get_term_from_expr (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
   | TE_ident { name; _ } -> term_app (Hashtbl.find symbols name) n
   | TE_op ((Op_add | Op_add_f), es) ->
     get_term_from_binop symbols n Term.Plus es
-  | TE_op (Op_sub, [ e ]) -> term_0 -@ get_term_from_expr symbols n e
-  | TE_op (Op_sub_f, [ e ]) -> term_0f -@ get_term_from_expr symbols n e
+  | TE_op (Op_sub, [ e ]) -> term_0 -@ get_term_from_expr 0 symbols n e
+  | TE_op (Op_sub_f, [ e ]) -> term_0f -@ get_term_from_expr 0 symbols n e
   | TE_op ((Op_sub | Op_sub_f), es) ->
     get_term_from_binop symbols n Term.Minus es
   | TE_op ((Op_mul | Op_mul_f), es) ->
@@ -283,7 +284,7 @@ and get_term_from_expr (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
   | TE_op (Op_mod, es) -> get_term_from_binop symbols n Term.Modulo es
   | TE_op (Op_if, es) ->
     let d1, d2, d3 =
-      es |> List.map (get_term_from_expr symbols n) |> assume_3
+      es |> List.map (get_term_from_expr 0 symbols n) |> assume_3
     in
     Term.make_ite (d1 =@ Term.t_true) d2 d3
   | TE_prim ({ name; _ }, es) when name = "int_of_real" ->
@@ -292,10 +293,11 @@ and get_term_from_expr (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
     failwith "TODO-real_of_int"
   | TE_prim _ -> assert false
   | TE_arrow (e1, e2) ->
-    Term.make_ite (n =@ term_0)
-      (get_term_from_expr symbols n e1)
-      (get_term_from_expr symbols n e2)
-  | TE_pre e -> get_term_from_expr symbols (n -@ term_1) e
+    Term.make_ite
+      (n =@ term_int arr_length)
+      (get_term_from_expr 0 symbols n e1)
+      (get_term_from_expr (arr_length + 1) symbols n e2)
+  | TE_pre e -> get_term_from_expr 0 symbols (n -@ term_1) e
   | TE_op _ ->
     Format.printf "Cash on this expression :@.";
     Typed_ast_printer.print_exp Format.std_formatter expr;
@@ -309,7 +311,7 @@ and get_term_from_expr (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier et l'opération du SMT
 *)
 and get_term_from_binop symbols n op es =
-  let d1, d2 = es |> List.map (get_term_from_expr symbols n) |> assume_2 in
+  let d1, d2 = es |> List.map (get_term_from_expr 0 symbols n) |> assume_2 in
   Term.make_arith op d1 d2
 
 
@@ -323,7 +325,7 @@ let get_def_from_eqs symbols aux eqs : Aez.Smt.Term.t -> Aez.Smt.Formula.t =
         let def_name = (List.hd teq_patt.tpatt_desc).name in
         fun n ->
           term_app (Hashtbl.find symbols def_name) n
-          =@ get_term_from_expr symbols n teq_expr
+          =@ get_term_from_expr 0 symbols n teq_expr
       end
       eqs
   in
@@ -435,12 +437,13 @@ let get_base_case node delta p =
 (* Solveur cas de base k-inductif (a k fixe)*)
 
 let get_base_case_k_inductive delta p k =
-  let assume = BMC_solver.assume ~id:0 in
-  let entails = BMC_solver.entails ~id:0 in
+  let assume = BMC_solver.assume ~id:k in
+  let entails = BMC_solver.entails ~id:k in
   let check = BMC_solver.check in
 
   for i = 0 to k - 1 do
-    assume (delta (term_int i))
+    let delta_i = delta (term_int i) in
+    assume delta_i
   done;
   check ();
 
@@ -479,25 +482,30 @@ let get_ind_case delta p =
 (* Cas inductif pour k-induction (a k fixe)*)
 
 let get_ind_case_k_inductive delta p k =
-  let assume = IND_solver.assume ~id:0 in
-  let entails = IND_solver.entails ~id:0 in
+  let assume = IND_solver.assume ~id:k in
+  let entails = IND_solver.entails ~id:k in
   let check = IND_solver.check in
 
-  let n = Term.make_app (declare_symbol "n" [] Type.type_int) [] in
+  let n =
+    Term.make_app
+      (declare_symbol ("n_k_" ^ string_of_int k) [] Type.type_int)
+      []
+  in
 
   assume (term_0 <=@ n);
   assume (delta n);
   assume (p n);
 
-  for i = 1 to k + 1 do
-    assume (delta (n +@ term_int i))
+  for i = 1 to k do
+    let delta_k = delta (n +@ term_int i) in
+    assume delta_k
   done;
 
-  for i = 1 to k do
+  for i = 1 to k - 1 do
     assume (p (n +@ term_int i))
   done;
   check ();
-  entails (p (n +@ term_int (k + 1)))
+  entails (p (n +@ term_int k))
 
 
 (* ===== CHECKING ===== *)

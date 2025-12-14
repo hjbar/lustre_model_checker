@@ -1,0 +1,6 @@
+node check() returns (OK : bool);
+var x : int;
+let
+  x = 0 -> 1 -> pre(x) + pre(pre(x));
+    OK = (x>=0) ;
+tel;
