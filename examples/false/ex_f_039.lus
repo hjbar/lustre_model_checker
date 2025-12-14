@@ -1,0 +1,11 @@
+node incr (x : int) returns (cpt: int);
+let
+  cpt = (0 -> pre cpt) + x;
+tel
+
+node check (x: int) returns (OK: bool);
+var cpt : int;
+let
+  cpt = incr(incr(x));
+  OK = true -> (pre cpt) <= cpt;
+tel

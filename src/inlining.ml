@@ -1,394 +1,293 @@
-(* Explication de l'in-lining :
+(*
 
-   On récupère le noeud main du programme lustre.
-   On veut in-liner à partir de ce noeud (car c'est celui-ci qu'on veut garder à la fin).
-   Ainsi, on regarde dans chaque équation du noeud main si une définition fait appel à un autre noeud.
-   Si c'est le cas, on veut remplacer l'appel au noeud par la définition de ce dernier.
-   Pour ce faire, ce noeud ne doit pas faire appel à d'autre noeud.
-   C'est pour cela que récursivement on in-line tous les appels également dans ce noeud.
-   Pour grandement simplifier les choses, on in-line tous les tuples de ce noeud.
-   À présent, on veut intégrer ce noeud dans notre noeud main: il ne doit comporter qu'une seule équation.
-   Ainsi, on veut in-liner toutes les définitions des variables locales dans la définition des outputs.
-   Et à présent, pour in-liner les outputs dans l'appelant, on combine toutes les équantions pour en former qu'une seule.
-   Ainsi, on forme un tuple avec tous les outputs : (o1, o2, ..., on) = (e1, e2, ..., en).
-   Ces outputs sont maintenant in-liné dans l'appelant: le job est fait.
+  Explication de l'inlining :
+
+
+  Si le programme est composé d'un unique noeud,
+  alors on inline juste les tuples et on renvoie le noeud.
+
+  Sinon, on récupère le noeud main du programme Lustre.
+  Puis, on renomme ce noeud, c'est-à-dire qu'on renomme toutes les variables avec des noms uniques.
+  On peut à présent inliner les appels à d'autres noeuds qui se trouve dans le noeud main.
+  Pour ce faire, on itère sur toutes les équations du noeud à la recherche d'un appel.
+  Lorsque que l'on rencontre un appel, on inline d'abord les appels présent dans les arguments.
+  Ensuite, on récupère le noeud concerné par l'appel.
+  On commence par inliner les appels de ce dernier, puis on renomme le noeud (pour éviter les conflits
+  dûs aux noms des variables), enfin on remplace les inputs par les paramètres de l'appelant.
+  Ainsi, on stocke sur le côté les variables locales et les outputs du noeud qu'on traitait à l'origine
+  (appelons les extra_locals) ainsi que les équations de ce même noeud (appelons les extra_equs).
+  Maintenant, on remplace dans l'expression l'appel au noeud par la variable output du noeud qu'on appelait
+  (si il y a plusieurs outputs alors on remplace par un tuple des outputs).
+  Une fois ceci fait, on n'a plus d'appel à d'autres noms dans le noeud main.
+  On en profite alors on inliner les tuples du noeud main.
+  Cela est facile puisque l'on n'a pas d'appel, on a alors toujours des équations de la forme
+  v = e ou alors v1, ..., vn = e1, ..., en. On remplace alors cette dernière d'équation par
+  n nouvelles équations : v1 = e1 et ... et vn = en.
+
 *)
 
 open Typed_ast
 open Ident
 
-(* Renvoie True si la liste possède au moins deux éléments, False sinon *)
+(* ===== UTILS ===== *)
 
+(* Renvoie True si la liste possède au moins deux éléments, False sinon *)
 let have_to_inline = function
   | [] | [ _ ] -> false
   | _ -> true
 
 
 (* Renvoie une Hashtbl des noms vers leur noeud *)
-
-let hashtbl_from_nodes nodes =
+let hashtbl_from_program nodes =
   let ht = Hashtbl.create 16 in
   List.iter (fun node -> Hashtbl.replace ht node.tn_name.name node) nodes;
   ht
 
 
-(* Renvoie les équations-outputs d'un noeud
-   Pré-condition: ne pas avoir de tuples dans les équations *)
-
-let get_outputs node =
-  let output_ids = List.map fst node.tn_output in
-  List.filter
-    (fun equ -> List.mem (List.hd equ.teq_patt.tpatt_desc) output_ids)
-    node.tn_equs
+(* Renvoie les éléments d'un tuple *)
+let assume_tuple expr =
+  match expr.texpr_desc with
+  | TE_tuple es -> es
+  | _ -> assert false
 
 
-(* Récupère l'équation locale si elle existe
-   Pré-condition: ne pas avoir de tuples dans les équations *)
+(* ===== RENAMING ===== *)
 
-let get_local_equ output_id id equs =
-  List.find_opt
-    begin fun eqn ->
-      (* On sait qu'on a pas de tuples *)
-      let current_id = List.hd eqn.teq_patt.tpatt_desc in
-      current_id <> output_id && current_id = id
-    end
-    equs
+(* Renvoie un ident frais à partir d'un ident donné
+   Si une ident frais a déjà été créer à partir d'un
+   ident donnée alors on renvoie cet ident frais
+   Warning: appeler reset_rename_ident avant de renommer un noeud
+*)
+let rename_ident, reset_rename_ident =
+  let fresh_idents = Hashtbl.create 16 in
+  let cpt = ref ~-1 in
 
-
-(* Renvoie un noeud en inlinant tous les tuples
-   Pré-condition : avoir in-liné tous les sous-noeuds *)
-
-let inline_tuple node =
-  let rec simpl expr =
-    let texpr_desc =
-      match expr.texpr_desc with
-      | TE_const c -> TE_const c
-      | TE_ident id -> TE_ident id
-      | TE_op (op, es) -> TE_op (op, List.map simpl es)
-      | TE_app (id, es) -> TE_app (id, List.map simpl es)
-      | TE_prim (id, es) -> TE_prim (id, List.map simpl es)
-      | TE_arrow (e1, e2) -> TE_arrow (simpl e1, simpl e2)
-      | TE_pre e -> TE_pre (simpl e)
-      | TE_tuple [ e ] -> (simpl e).texpr_desc
-      | TE_tuple es -> TE_tuple (List.map simpl es)
-    in
-    { expr with texpr_desc }
+  let rename_ident ident =
+    if ident.name = "OK" then ident
+    else
+      match Hashtbl.find_opt fresh_idents ident with
+      | Some fresh_ident -> fresh_ident
+      | None ->
+        incr cpt;
+        let fresh_name = Format.sprintf "id%d_%s" !cpt ident.name in
+        let fresh_ident = Ident.make fresh_name ident.kind in
+        Hashtbl.replace fresh_idents ident fresh_ident;
+        fresh_ident
   in
 
-  let rec loop equs acc =
-    match equs with
-    | [] -> List.rev acc
-    | equ :: equs -> begin
-      match equ.teq_patt.tpatt_desc with
-      | [] -> assert false
-      | [ left_id ] -> loop equs (equ :: acc)
-      | ids ->
-        (* On a un tuple, on inline *)
-        let types = equ.teq_patt.tpatt_type in
-        let zip = List.combine ids types in
+  let reset_rename_ident () = Hashtbl.reset fresh_idents in
 
-        let exprs =
-          match equ.teq_expr.texpr_desc with
-          | TE_tuple es -> es
-          | _ -> assert false (* On a in-liné tous les sous-noeuds *)
-        in
+  (rename_ident, reset_rename_ident)
 
-        let new_equs =
-          List.map2
-            begin fun (id, ty) e ->
-              let tpatt_desc = [ id ] in
-              let tpatt_type = [ ty ] in
-              let tpatt_loc = equ.teq_patt.tpatt_loc in
-              let teq_patt = { tpatt_desc; tpatt_type; tpatt_loc } in
 
-              let teq_expr = e in
+(* Renvoie une variable fraîche à partir d'une variable donnée
+   Si une variable fraîche a déjà été créer à partir d'une variable
+   donnée alors on renvoie cette variable fraîche
+*)
+let rename_var (ident, ty) = (rename_ident ident, ty)
 
-              { teq_patt; teq_expr }
-            end
-            zip exprs
-        in
-
-        loop equs (new_equs @ acc)
-    end
+(* Renomme toutes les variables de cette expression
+   pour éviter les conflits avec des variables ayant le même nom
+*)
+let rec rename_expr ({ texpr_desc; _ } as expr) =
+  let texpr_desc =
+    match texpr_desc with
+    | TE_const _ -> texpr_desc
+    | TE_ident ident -> TE_ident (rename_ident ident)
+    | TE_op (op, es) -> TE_op (op, List.map rename_expr es)
+    | TE_app (f, es) -> TE_app (f, List.map rename_expr es)
+    | TE_prim (f, es) -> TE_prim (f, List.map rename_expr es)
+    | TE_arrow (e1, e2) -> TE_arrow (rename_expr e1, rename_expr e2)
+    | TE_pre e -> TE_pre (rename_expr e)
+    | TE_tuple es -> TE_tuple (List.map rename_expr es)
   in
+  { expr with texpr_desc }
 
-  let tn_equs =
-    List.map
-      (fun equ -> { equ with teq_expr = simpl equ.teq_expr })
-      node.tn_equs
+
+(* Renomme toutes les variables de cette équation
+   pour éviter les conflits avec des variables ayant le même nom
+*)
+let rename_equ { teq_patt; teq_expr } =
+  let tpatt_desc = List.map rename_ident teq_patt.tpatt_desc in
+  let teq_patt = { teq_patt with tpatt_desc } in
+
+  let teq_expr = rename_expr teq_expr in
+
+  { teq_patt; teq_expr }
+
+
+(* Renomme toutes les variables de ce noeud
+   pour éviter les conflits avec des variables ayant le même nom
+*)
+let rename_node ({ tn_input; tn_output; tn_local; tn_equs; _ } as node) =
+  reset_rename_ident ();
+
+  let tn_input = List.map rename_var tn_input in
+  let tn_output = List.map rename_var tn_output in
+  let tn_local = List.map rename_var tn_local in
+  let tn_equs = List.map rename_equ tn_equs in
+
+  { node with tn_input; tn_output; tn_local; tn_equs }
+
+
+(* Renomme toutes les variables du programme
+   pour éviter les conflits avec des variables ayant le même nom
+*)
+let rename_program nodes = List.map rename_node nodes
+
+(* ===== CALLS INLINING ===== *)
+
+(* Substitue cet input par cette expression dans cette expression donnée *)
+let rec subst_expr ((var, _) as input) expr ({ texpr_desc; _ } as expr_src) =
+  let texpr_desc =
+    match texpr_desc with
+    | TE_const _ -> texpr_desc
+    | TE_ident ident ->
+      if ident.name = var.name then expr.texpr_desc else texpr_desc
+    | TE_op (op, es) -> TE_op (op, List.map (subst_expr input expr) es)
+    | TE_app (f, es) -> TE_app (f, List.map (subst_expr input expr) es)
+    | TE_prim (f, es) -> TE_prim (f, List.map (subst_expr input expr) es)
+    | TE_arrow (e1, e2) ->
+      TE_arrow (subst_expr input expr e1, subst_expr input expr e2)
+    | TE_pre e -> TE_pre (subst_expr input expr e)
+    | TE_tuple es -> TE_tuple (List.map (subst_expr input expr) es)
   in
-  let tn_equs = loop tn_equs [] in
+  { expr_src with texpr_desc }
+
+
+(* Substitue cet input par cette epression dans cette équation *)
+let subst_equ input expr ({ teq_expr; _ } as equ) =
+  let teq_expr = subst_expr input expr teq_expr in
+  { equ with teq_expr }
+
+
+(* Substitue cet input par cette expression dans les équations de ce noeud *)
+let subst_node input expr ({ tn_equs; _ } as node) =
+  let tn_equs = List.map (subst_equ input expr) tn_equs in
   { node with tn_equs }
 
 
-(* Renvoie les outputs en une seule équation grâce à un tuple
-   Pré-condition: aucun tuple dans les équations du noeud *)
+(* Substitue tous les inputs par ces expressions données *)
+let replace_inputs es node =
+  List.fold_left2
+    (fun node input expr -> subst_node input expr node)
+    node node.tn_input es
 
-let combine_outputs_equs node output_equs =
-  (* On récupère les idents des outputs *)
-  let output_ids = List.map fst node.tn_output in
 
-  (* On trie les équations définissant les outputs selon l'ordre de retour
-     Pré-condition: aucun tuple dans les équantions *)
-  let rec sort output_ids acc =
-    match output_ids with
-    | [] -> List.rev acc
-    | output_id :: output_ids ->
-      let equ =
-        List.find
-          (* On sait qu'on a aucun tuple *)
-          (fun equ -> List.hd equ.teq_patt.tpatt_desc = output_id )
-          output_equs
+(* Inline tous les appels de cette expression *)
+let rec inline_calls_expr
+  nodes extra_locals extra_equs ({ texpr_desc; _ } as expr) =
+  let texpr_desc =
+    match texpr_desc with
+    | TE_const _ -> texpr_desc
+    | TE_ident _ -> texpr_desc
+    | TE_op (op, es) ->
+      TE_op (op, List.map (inline_calls_expr nodes extra_locals extra_equs) es)
+    | TE_app (f, es) -> begin
+      let es = List.map (inline_calls_expr nodes extra_locals extra_equs) es in
+
+      let f_node =
+        f.name
+        |> Hashtbl.find nodes
+        |> inline_calls_node nodes
+        |> rename_node
+        |> replace_inputs es
       in
-      sort output_ids (equ :: acc)
+
+      extra_locals := f_node.tn_output @ !extra_locals;
+      extra_locals := f_node.tn_local @ !extra_locals;
+
+      extra_equs := f_node.tn_equs @ !extra_equs;
+
+      match f_node.tn_output with
+      | [ (ident, _) ] -> TE_ident ident
+      | vars ->
+        let es =
+          List.map
+            begin fun (ident, ty) ->
+              let texpr_desc = TE_ident ident in
+              let texpr_type = [ ty ] in
+              let texpr_loc = (Lexing.dummy_pos, Lexing.dummy_pos) in
+              { texpr_desc; texpr_type; texpr_loc }
+            end
+            vars
+        in
+        TE_tuple es
+    end
+    | TE_prim (f, es) ->
+      TE_prim (f, List.map (inline_calls_expr nodes extra_locals extra_equs) es)
+    | TE_arrow (e1, e2) ->
+      let e1 = inline_calls_expr nodes extra_locals extra_equs e1 in
+      let e2 = inline_calls_expr nodes extra_locals extra_equs e2 in
+      TE_arrow (e1, e2)
+    | TE_pre e -> TE_pre (inline_calls_expr nodes extra_locals extra_equs e)
+    | TE_tuple es ->
+      TE_tuple (List.map (inline_calls_expr nodes extra_locals extra_equs) es)
+  in
+  { expr with texpr_desc }
+
+
+(* Inline tous les appels de cette équations *)
+and inline_calls_equs nodes extra_locals extra_equs ({ teq_expr; _ } as equ) =
+  let teq_expr = inline_calls_expr nodes extra_locals extra_equs teq_expr in
+  { equ with teq_expr }
+
+
+(* Inline tous les appels de ce noeud *)
+and inline_calls_node nodes ({ tn_local; tn_equs; _ } as node) =
+  let extra_locals = ref [] in
+  let extra_equs = ref [] in
+
+  let tn_equs =
+    List.map (inline_calls_equs nodes extra_locals extra_equs) tn_equs
   in
 
-  (* Une loc par défaut pour re-créer les tuples *)
-  let tpatt_loc = (List.hd output_equs).teq_patt.tpatt_loc in
-  let texpr_loc = tpatt_loc in
+  let tn_local = !extra_locals @ tn_local in
+  let tn_equs = !extra_equs @ tn_equs in
 
-  (* On re-créer les tuples pour renvoyer les outputs
-     Pré-condition: aucun tuple dans les équantions *)
-  let rec make_tuple output_equs ids tys es =
-    match output_equs with
-    | [] ->
-      let tpatt_desc = List.rev ids in
-      let tpatt_type = List.rev tys in
-      let teq_patt = { tpatt_desc; tpatt_type; tpatt_loc } in
-
-      let texpr_desc = TE_tuple (List.rev es) in
-      let texpr_type = tpatt_type in
-      let teq_expr = { texpr_desc; texpr_type; texpr_loc } in
-
-      { teq_patt; teq_expr }
-    | output_equ :: output_equs ->
-      (* On sait qu'on a aucun tuple *)
-      let id = output_equ.teq_patt.tpatt_desc |> List.hd in
-      let ty = output_equ.teq_patt.tpatt_type |> List.hd in
-      let e = output_equ.teq_expr in
-
-      make_tuple output_equs (id :: ids) (ty :: tys) (e :: es)
-  in
-
-  (* Trie les équantions définssant les outputs et les renvoie sous la forme d'un tuple *)
-  let output_equs = sort output_ids [] in
-  make_tuple output_equs [] [] []
-
-
-(* Inline une liste d'équations en une unique équation
-   Pré-condition: aucun tuple dans les équations *)
-
-let inline_in_node node =
-  (* On récupère les équantions définssant les outputs *)
-  let output_eqns = get_outputs node in
-
-  (* In-line les équations-locales dans les équantions-output
-     Pré-condition: aucun tuple dans les équantions-output *)
-  let rec replace output_id e =
-    let texpr_desc =
-      match e.texpr_desc with
-      | TE_ident id -> begin
-        match get_local_equ output_id id node.tn_equs with
-        | None -> TE_ident id
-        | Some eqn -> (replace output_id eqn.teq_expr).texpr_desc
-      end
-      | TE_const c -> TE_const c
-      | TE_op (op, es) -> TE_op (op, List.map (replace output_id) es)
-      | TE_app (f, args) -> TE_app (f, List.map (replace output_id) args)
-      | TE_prim (id, es) -> TE_prim (id, List.map (replace output_id) es)
-      | TE_arrow (e1, e2) ->
-        TE_arrow (replace output_id e1, replace output_id e2)
-      | TE_pre e -> TE_pre (replace output_id e)
-      | TE_tuple es -> TE_tuple (List.map (replace output_id) es)
-    in
-    { e with texpr_desc }
-  in
-
-  (* On in-line les équations-locales du noeud dans les équantions-outputs,
-     puis on les renvoies sur la forme d'un tuple *)
-  output_eqns
-  |> List.map (fun eqn ->
-    (* On sait qu'on n'a pas de tuple *)
-    let teq_expr = replace (List.hd eqn.teq_patt.tpatt_desc) eqn.teq_expr in
-    { eqn with teq_expr } )
-  |> combine_outputs_equs node
-
-
-(* Renomme les variables locales pour éviter les collisions entre plusieurs appels inlinés *)
-let rename_locals node =
-  let counter = ref 0 in
-  let rename_id id =
-    incr counter;
-    Ident.make (Format.sprintf "%s__inl_%d" id.name !counter) id.kind
-  in
-
-  (* table de renaming uniquement pour les locaux *)
-  let local_map = Hashtbl.create 16 in
-  List.iter
-    (fun (lid, _) -> Hashtbl.replace local_map lid (rename_id lid))
-    node.tn_local;
-
-  let rename_ident_if_local id =
-    match Hashtbl.find_opt local_map id with
-    | Some nid -> nid
-    | None -> id
-  in
-
-  let rec rename_expr e =
-    let texpr_desc =
-      match e.texpr_desc with
-      | TE_ident id -> TE_ident (rename_ident_if_local id)
-      | TE_const c -> TE_const c
-      | TE_op (op, es) -> TE_op (op, List.map rename_expr es)
-      | TE_app (id, es) -> TE_app (id, List.map rename_expr es)
-      | TE_prim (id, es) -> TE_prim (id, List.map rename_expr es)
-      | TE_arrow (e1, e2) -> TE_arrow (rename_expr e1, rename_expr e2)
-      | TE_pre e -> TE_pre (rename_expr e)
-      | TE_tuple es -> TE_tuple (List.map rename_expr es)
-    in
-    { e with texpr_desc }
-  in
-
-  let rename_equ equ =
-    let tpatt_desc =
-      equ.teq_patt.tpatt_desc |> List.map rename_ident_if_local
-    in
-    let teq_expr = rename_expr equ.teq_expr in
-    let teq_patt =
-      {
-        tpatt_desc;
-        tpatt_type = equ.teq_patt.tpatt_type;
-        tpatt_loc = equ.teq_patt.tpatt_loc;
-      }
-    in
-    { teq_patt; teq_expr }
-  in
-
-  let tn_local =
-    List.map
-      (fun (id, ty) ->
-        match Hashtbl.find_opt local_map id with
-        | Some nid -> (nid, ty)
-        | None -> (id, ty) )
-      node.tn_local
-  in
-
-  let tn_equs = List.map rename_equ node.tn_equs in
   { node with tn_local; tn_equs }
 
 
-(* Remplace les paramètres par les arguments *)
+(* ===== TUPLES INLINING ===== *)
 
-let rec replace_expr ht left_ids f args =
-  (* On récupère le noeud, on l'in-line récursivement les sous-noeuds, on in-line les tuples *)
-  let node = Hashtbl.find ht f.name |> inline_from_node ht |> inline_tuple in
+(* Inline les tuples d'une équation
+   Pré-condition: ne pas avoir d'appel à un autre noeud
+*)
+let inline_tuples_equ ({ teq_patt; teq_expr } as equ) =
+  match (teq_patt.tpatt_desc, teq_patt.tpatt_type) with
+  | [], _ -> assert false
+  | [ _ ], _ -> [ equ ]
+  | ids, tys ->
+    let es = assume_tuple teq_expr in
+    List.map2
+      begin fun (id, ty) teq_expr ->
+        let tpatt_desc = [ id ] in
+        let tpatt_type = [ ty ] in
+        let tpatt_loc = (Lexing.dummy_pos, Lexing.dummy_pos) in
+        let teq_patt = { tpatt_desc; tpatt_type; tpatt_loc } in
 
-  let node = rename_locals node in
-
-  (* Pour remplacer efficacement les inputs par les arguments *)
-  let mapping_input =
-    let map = Hashtbl.create 16 in
-    List.iter2
-      (fun (input_id, _) arg -> Hashtbl.replace map input_id arg)
-      node.tn_input args;
-    map
-  in
-
-  (* Pour remplacer efficacement les outputs par les variables de l'appelant *)
-  let mapping_output =
-    let map = Hashtbl.create 16 in
-    List.iter2
-      (fun (output_id, _) left_id -> Hashtbl.replace map output_id left_id)
-      node.tn_output left_ids;
-    map
-  in
-
-  (* Remplace les inputs et les outputs
-     Pré-condition: on a in-liné tous les sous-noeuds *)
-  let rec replace e =
-    let texpr_desc =
-      match e.texpr_desc with
-      | TE_ident id -> begin
-        match Hashtbl.find_opt mapping_input id with
-        | Some new_expr -> new_expr.texpr_desc
-        | None -> begin
-          match Hashtbl.find_opt mapping_output id with
-          | Some new_id -> TE_ident new_id
-          | None -> TE_ident id
-        end
+        { teq_patt; teq_expr }
       end
-      | TE_const c -> TE_const c
-      | TE_op (op, es) -> TE_op (op, List.map replace es)
-      | TE_prim (id, es) -> TE_prim (id, List.map replace es)
-      | TE_arrow (e1, e2) -> TE_arrow (replace e1, replace e2)
-      | TE_pre e -> TE_pre (replace e)
-      | TE_tuple es -> TE_tuple (List.map replace es)
-      | TE_app (_, _) -> assert false
-    in
-    { e with texpr_desc }
-  in
-
-  (* On in-line toutes les équantions internes du noeud pour en garder qu'une seule,
-     puis on remplace les inputs et outputs *)
-  let eqn = inline_in_node node in
-  (replace eqn.teq_expr).texpr_desc
+      (List.combine ids tys) es
 
 
-(* Renvoie l'expression d'entrée avec chaque appel inliné *)
-
-and inline_from_expr ht left_ids e =
-  let texpr_desc =
-    match e.texpr_desc with
-    | TE_app (f, args) -> replace_expr ht left_ids f args
-    | TE_const c -> TE_const c
-    | TE_ident id -> TE_ident id
-    | TE_op (op, es) -> TE_op (op, inline_from_expr_list ht left_ids es)
-    | TE_prim (id, es) -> TE_prim (id, inline_from_expr_list ht left_ids es)
-    | TE_arrow (e1, e2) ->
-      TE_arrow (inline_from_expr ht left_ids e1, inline_from_expr ht left_ids e2)
-    | TE_pre e -> TE_pre (inline_from_expr ht left_ids e)
-    | TE_tuple es ->
-      (* Cas particulier: on doit remplacer avec seulement les idents correspondant *)
-      let rec loop es left_ids acc =
-        match (es, left_ids) with
-        | [], [] -> List.rev acc
-        | e :: es, left_id :: left_ids ->
-          let new_e = inline_from_expr ht [ left_id ] e in
-          loop es left_ids (new_e :: acc)
-        | _ -> assert false
-      in
-      TE_tuple (loop es left_ids [])
-  in
-  { e with texpr_desc }
-
-
-and inline_from_expr_list ht left_ids es =
-  List.map (inline_from_expr ht left_ids) es
-
-
-(* Renvoie l'équation d'entrée avec chaque appel inliné *)
-
-and inline_from_eqn ht eqn =
-  let teq_expr = inline_from_expr ht eqn.teq_patt.tpatt_desc eqn.teq_expr in
-  { eqn with teq_expr }
-
-
-(* Renvoie le noeud d'entrée avec chaque sous-noeuds inlinés *)
-
-and inline_from_node ht node =
-  let tn_equs = List.map (inline_from_eqn ht) node.tn_equs in
+(* Inline les tuples d'un noeud
+   Pré-condition: ne pas avoir d'appel à un autre noeud
+*)
+let inline_tuples_node ({ tn_equs; _ } as node) =
+  let tn_equs = tn_equs |> List.map inline_tuples_equ |> List.flatten in
   { node with tn_equs }
 
 
-(* In-line les sous-noeuds dans le noeud principal *)
+(* ===== MAIN INLINING FUNCTION ===== *)
 
-let inline nodes main =
-  let inlined_node =
-    match have_to_inline nodes with
-    | false -> List.hd nodes
+(* In-line les sous-noeuds dans le noeud principal *)
+let inline program main =
+  let main_node =
+    match have_to_inline program with
+    | false -> List.hd program
     | true ->
-      let ht = hashtbl_from_nodes nodes in
-      let main_node = Hashtbl.find ht main in
-      inline_from_node ht main_node
+      let nodes = hashtbl_from_program program in
+      main |> Hashtbl.find nodes |> rename_node |> inline_calls_node nodes
   in
-  inline_tuple inlined_node
+  inline_tuples_node main_node
