@@ -72,9 +72,9 @@ let num_2 = Num.Int 2
    https://stackoverflow.com/questions/40219852/string-to-float-in-ocaml-over-and-under-approximation
 
    expand consiste à convertir un nombre flottant en un développement binaire,
-   i.e. expand(x) = floor(x) + (expand (2 * frac(x)) / 2) si frac(x) <> 0, sinon 0
+   i.e. expand(x) = floor(x) + ((expand (2 * frac(x)) / 2) si frac(x) <> 0, sinon 0)
 
-   frexp nous donne une décomposition de x telle que x = fl * 2^ex avec fl un float OCaml
+   frexp nous donne une décomposition de x telle que x = fl * 2^ex avec 0.5 <= fl < 1 un float OCaml
    Maintenant on calcul expand(fl) * 2^ex avec expand qui converti fl en rationel Num
    Si ex=0 alors x = fl * 2^0 = fl * 1 = fl donc on expand fl sans multiplier par 2^ex
 *)
