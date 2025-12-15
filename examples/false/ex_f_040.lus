@@ -1,0 +1,25 @@
+node Inc(x : int) returns (o : int);
+let
+  o = x + (0 -> pre o);
+tel
+
+node Sofar(x : bool) returns (y : bool);
+let
+  y = x and (true -> pre y);
+tel
+
+node F(x : int; b : bool) returns (y : int; ok : bool);
+var s : int;
+let
+  s  = x + (0 -> pre s);
+  y  = if b then s else (x -> pre y);
+  ok = (b => (y = s)) and (true -> pre ok);
+tel
+
+node check(A : int; B : bool) returns (OK : bool);
+var y1, y2 : int; ok1, ok2 : bool;
+let
+  (y1, ok1) = F(Inc(A), Sofar(B));
+  (y2, ok2) = F(pre y1, not ok1);
+  OK = ok1 and ok2 and ((if B then y1 else y2) >= 0);
+tel
