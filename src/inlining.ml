@@ -37,6 +37,11 @@ let have_to_inline = function
   | _ -> true
 
 
+let assume_1 = function
+  | [ e1 ] -> e1
+  | _ -> assert false
+
+
 (* Renvoie une Hashtbl des noms vers leur noeud *)
 let hashtbl_from_program nodes =
   let ht = Hashtbl.create 16 in
@@ -286,6 +291,75 @@ let inline_tuples_node ({ tn_equs; _ } as node) =
   { node with tn_equs }
 
 
+(* ===== Pre NORMALIZATION ===== *)
+
+let pre_norm_fresh_ident =
+  let cpt = ref ~-1 in
+  fun () ->
+    incr cpt;
+    let fresh_name = Format.sprintf "pre_norm_id%d" !cpt in
+    Ident.make fresh_name Ident.Stream
+
+
+(* On considère que le programme est normalisé si tous les pre sont appliqués à des identifiants. *)
+
+let rec normalize_pre_expr extra_vars extra_equs ({ texpr_desc; _ } as expr) =
+  match texpr_desc with
+  | TE_const _ -> expr
+  | TE_ident _ -> expr
+  | TE_op (op, es) ->
+    let es = List.map (normalize_pre_expr extra_vars extra_equs) es in
+    { expr with texpr_desc = TE_op (op, es) }
+  | TE_app (f, es) ->
+    let es = List.map (normalize_pre_expr extra_vars extra_equs) es in
+    { expr with texpr_desc = TE_app (f, es) }
+  | TE_prim (f, es) ->
+    let es = List.map (normalize_pre_expr extra_vars extra_equs) es in
+    { expr with texpr_desc = TE_prim (f, es) }
+  | TE_arrow (e1, e2) ->
+    let e1 = normalize_pre_expr extra_vars extra_equs e1 in
+    let e2 = normalize_pre_expr extra_vars extra_equs e2 in
+    { expr with texpr_desc = TE_arrow (e1, e2) }
+  | TE_pre e -> begin
+    let e = normalize_pre_expr extra_vars extra_equs e in
+    match e.texpr_desc with
+    | TE_ident _ -> { expr with texpr_desc = TE_pre e }
+    | _ ->
+      let fresh_ident = pre_norm_fresh_ident () in
+      let fresh_var = (fresh_ident, assume_1 e.texpr_type) in
+      extra_vars := fresh_var :: !extra_vars;
+      let equ =
+        {
+          teq_patt =
+            {
+              tpatt_desc = [ fresh_ident ];
+              tpatt_type = e.texpr_type;
+              tpatt_loc = (Lexing.dummy_pos, Lexing.dummy_pos);
+            };
+          teq_expr = e;
+        }
+      in
+      extra_equs := equ :: !extra_equs;
+      let texpr_desc = TE_pre { e with texpr_desc = TE_ident fresh_ident } in
+      { expr with texpr_desc }
+  end
+  | TE_tuple _ -> assert false
+
+
+let normalize_pre_equs extra_vars extra_equs ({ teq_expr; _ } as equ) =
+  let teq_expr = normalize_pre_expr extra_vars extra_equs teq_expr in
+  { equ with teq_expr }
+
+
+let normalize_pre_node ({ tn_equs; tn_local; _ } as node) =
+  let extra_vars = ref [] in
+  let extra_equs = ref [] in
+  let tn_equs = List.map (normalize_pre_equs extra_vars extra_equs) tn_equs in
+  let tn_local = !extra_vars @ tn_local in
+  let tn_equs = !extra_equs @ tn_equs in
+  { node with tn_local; tn_equs }
+
+
 (* ===== MAIN INLINING FUNCTION ===== *)
 
 (* In-line les sous-noeuds dans le noeud principal *)
@@ -297,4 +371,6 @@ let inline program main =
       let nodes = hashtbl_from_program program in
       main |> Hashtbl.find nodes |> rename_node |> inline_calls_node nodes
   in
-  inline_tuples_node main_node
+  let main_node = inline_tuples_node main_node in
+  let main_node = normalize_pre_node main_node in
+  main_node
