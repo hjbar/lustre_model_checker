@@ -288,8 +288,10 @@ and get_term_from_expr
     in
     Term.make_ite (d1 =@ Term.t_true) d2 d3
   | TE_prim ({ name; _ }, es) when name = "int_of_real" ->
+    ignore es;
     failwith "TODO-int_of_real"
   | TE_prim ({ name; _ }, es) when name = "real_of_int" ->
+    ignore es;
     failwith "TODO-real_of_int"
   | TE_prim _ -> assert false
   | TE_arrow (e1, e2) ->

@@ -14,10 +14,6 @@ let type_only = ref false
 
 let norm_only = ref false
 
-let lucy_printer = ref false
-
-let ocaml_printer = ref true
-
 let verbose = ref false
 
 let spec =

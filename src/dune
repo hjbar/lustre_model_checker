@@ -7,11 +7,3 @@
 (executable
  (name lmoch)
  (libraries aez))
-
-(env
- (dev
-  (flags
-   (:standard -warn-error -A)))
- (release
-  (flags
-   (:standard -warn-error -A))))

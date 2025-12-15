@@ -102,7 +102,7 @@ let print_var_dec fmt (name, ty) =
   fprintf fmt "%a : %a" Ident.print name print_base_type ty
 
 
-let rec print_var_dec_list = print_list print_var_dec ";"
+let print_var_dec_list = print_list print_var_dec ";"
 
 let print_node fmt nd =
   fprintf fmt

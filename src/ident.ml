@@ -16,7 +16,7 @@ let make =
     { id = !cpt; name = s; kind }
 
 
-let compare = Pervasives.compare
+let compare = Stdlib.compare
 
 let print fmt x = Format.fprintf fmt "%s__%i" x.name x.id
 

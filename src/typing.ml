@@ -401,7 +401,7 @@ let type_equation env eq =
     error eq.peq_expr.pexpr_loc (ExpectedType (expr.texpr_type, patt.tpatt_type))
 
 
-let add_vars_of_patt loc s { teq_patt = { tpatt_desc = p } } =
+let add_vars_of_patt loc s { teq_patt = { tpatt_desc = p; _ }; _ } =
   let add x s =
     if S.mem x s then error loc (Clash x.Ident.name);
     S.add x s

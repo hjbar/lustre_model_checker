@@ -234,18 +234,25 @@ and inline_calls_equs nodes extra_locals extra_equs ({ teq_expr; _ } as equ) =
 
 
 (* Inline tous les appels de ce noeud *)
-and inline_calls_node nodes ({ tn_local; tn_equs; _ } as node) =
-  let extra_locals = ref [] in
-  let extra_equs = ref [] in
+and inline_calls_node =
+  let inlined_nodes = Hashtbl.create 16 in
+  fun nodes ({ tn_name; tn_local; tn_equs; _ } as node) ->
+    match Hashtbl.find_opt inlined_nodes tn_name with
+    | Some inlined_node -> inlined_node
+    | None ->
+      let extra_locals = ref [] in
+      let extra_equs = ref [] in
 
-  let tn_equs =
-    List.map (inline_calls_equs nodes extra_locals extra_equs) tn_equs
-  in
+      let tn_equs =
+        List.map (inline_calls_equs nodes extra_locals extra_equs) tn_equs
+      in
 
-  let tn_local = !extra_locals @ tn_local in
-  let tn_equs = !extra_equs @ tn_equs in
+      let tn_local = !extra_locals @ tn_local in
+      let tn_equs = !extra_equs @ tn_equs in
 
-  { node with tn_local; tn_equs }
+      let inlined_node = { node with tn_local; tn_equs } in
+      Hashtbl.replace inlined_nodes tn_name inlined_node;
+      inlined_node
 
 
 (* ===== TUPLES INLINING ===== *)

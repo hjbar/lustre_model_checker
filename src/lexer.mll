@@ -3,7 +3,6 @@
   open Lexing
   open Parser
   open Asttypes
-  open Parse_ast
 
   exception Lexical_error of string
 

@@ -14,18 +14,18 @@ end)
 
 (** [add_vars_of_patt s patt] ajoute à l'ensemble [s] les variables introduites
     par le motif [patt]. *)
-let add_vars_of_patt s { tpatt_desc = p } =
+let add_vars_of_patt s { tpatt_desc = p; _ } =
   List.fold_left (fun s x -> S.add x s) s p
 
 
 (** [add_vars_of_exp s exp] ajoute à l'ensemble [s] les variables dont
     l'expression [exp] dépend instantanément. *)
-let rec add_vars_of_exp s { texpr_desc = e } =
+let rec add_vars_of_exp s { texpr_desc = e; _ } =
   match e with
   | TE_const _ -> s
   | TE_ident x -> S.add x s
   | TE_arrow (e1, e2) -> add_vars_of_exp (add_vars_of_exp s e1) e2
-  | TE_pre e -> s
+  | TE_pre _ -> s
   | TE_op (_, el) -> List.fold_left (fun s e -> add_vars_of_exp s e) s el
   | TE_app (_, l) -> List.fold_left add_vars_of_exp s l
   | TE_prim (_, l) -> List.fold_left add_vars_of_exp s l
