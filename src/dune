@@ -6,4 +6,4 @@
 
 (executable
  (name lmoch)
- (libraries aez))
+ (libraries smtml))
