@@ -1,6 +1,5 @@
 open Utils
-open Aez
-open Smt
+open Smtml
 open Typed_ast
 open Ident
 
@@ -19,11 +18,11 @@ let require_formula expr =
 
 (* ===== TYPES ===== *)
 
-let type_bool = Type.type_bool
+let type_bool = Ty.Ty_bool
 
-let type_int = Type.type_int
+let type_int = Ty.Ty_int
 
-let type_real = Type.type_real
+let type_real = Ty.Ty_real
 
 (* Conversion d'un type Lustre en un type Alt-Ergo *)
 let asttype_to_smttype = function
@@ -50,149 +49,144 @@ let get_types_from_node aux { tn_input; tn_output; tn_local; _ } =
 (* ===== FORMULA ===== *)
 
 (* Négation d'une formule *)
-let formula_not f = Formula.make Formula.Not [ f ]
+let formula_not f = Expr.unop type_bool Ty.Unop.Not f
 
 (* Égalité entre deux termes *)
-let formula_eq t1 t2 = Formula.make_lit Formula.Eq [ t1; t2 ]
+let formula_eq t1 t2 = Expr.relop type_bool Ty.Relop.Eq t1 t2
 
 let ( =@ ) = formula_eq
 
 (* Non-égalité entre deux termes *)
-let formula_neq t1 t2 = Formula.make_lit Formula.Neq [ t1; t2 ]
+let formula_neq t1 t2 = Expr.relop type_bool Ty.Relop.Ne t1 t2
 
 let ( <>@ ) = formula_neq
 
 (* Inférieur ou égal pour deux termes *)
-let formula_le t1 t2 = Formula.make_lit Formula.Le [ t1; t2 ]
+let formula_le t1 t2 = Expr.relop type_int Ty.Relop.Le t1 t2
 
 let ( <=@ ) = formula_le
 
 (* Strictement inférieur pour deux termes *)
-let formula_lt t1 t2 = Formula.make_lit Formula.Lt [ t1; t2 ]
+let formula_lt t1 t2 = Expr.relop type_int Ty.Relop.Lt t1 t2
 
 let ( <@ ) = formula_lt
 
 (* Strictement supérieur pour deux termes *)
-let formula_gt t1 t2 = formula_not (t1 <=@ t2)
+let formula_gt t1 t2 = Expr.relop type_int Ty.Relop.Gt t1 t2
 
 let ( >@ ) = formula_gt
 
 (* Supérieur ou égal pour deux termes *)
-let formula_ge t1 t2 = formula_not (t1 <@ t2)
+let formula_ge t1 t2 = Expr.relop type_int Ty.Relop.Ge t1 t2
 
 let ( >=@ ) = formula_ge
 
 (* Conjonction entre deux formules *)
-let formula_and f1 f2 = Formula.make Formula.And [ f1; f2 ]
+let formula_and f1 f2 = Expr.binop type_bool Ty.Binop.And f1 f2
 
 let ( &&@ ) = formula_and
 
-let formula_ands fs = Formula.make Formula.And fs
+let rec formula_ands = function
+  | [] -> assert false
+  | [ t ] -> t
+  | [ t1; t2 ] -> t1 &&@ t2
+  | t :: ts -> t &&@ formula_ands ts
+
 
 (* Disjonction entre deux formules *)
-let formula_or f1 f2 = Formula.make Formula.Or [ f1; f2 ]
+let formula_or f1 f2 = Expr.binop type_bool Ty.Binop.Or f1 f2
 
 let ( ||@ ) = formula_or
 
 (* Implication entre deux formules *)
-let formula_imp f1 f2 = Formula.make Formula.Imp [ f1; f2 ]
+let formula_imp f1 f2 = Expr.binop type_bool Ty.Binop.Implies f1 f2
 
 (* Affiche une formule donnée *)
-let formula_print f = Formula.print Format.std_formatter f
-
-(* ===== NUM ===== *)
-
-(* Constante Num.num 0 *)
-let num_0 = Num.Int 0
-
-(* Constante Num.num 1 *)
-let num_1 = Num.Int 1
-
-(* Constante Num.num 2 *)
-let num_2 = Num.Int 2
-
-(* Conversion d'un float OCaml en un Num.num
-   Importé depuis StackOverflow
-   https://stackoverflow.com/questions/40219852/string-to-float-in-ocaml-over-and-under-approximation
-
-   expand consiste à convertir un nombre flottant en un développement binaire,
-   i.e. expand(x) = floor(x) + ((expand (2 * frac(x)) / 2) si frac(x) <> 0, sinon 0)
-
-   frexp nous donne une décomposition de x telle que x = fl * 2^ex avec 0.5 <= fl < 1 un float OCaml
-   Maintenant on calcul expand(fl) * 2^ex avec expand qui converti fl en rationel Num
-   Si ex=0 alors x = fl * 2^0 = fl * 1 = fl donc on expand fl sans multiplier par 2^ex
-*)
-let num_of_float x =
-  let rec expand x =
-    let fr, wh = modf x in
-    Num.add_num
-      (Num.Int (int_of_float wh))
-      (if fr = 0.0 then num_0 else Num.div_num (expand (2.0 *. fr)) num_2)
-  in
-  let fl, ex = frexp x in
-  if ex <> 0 then Num.mult_num (expand fl) (Num.power_num num_2 (Num.Int ex))
-  else expand fl
-
-
-(* Constante Num.num 0. *)
-let num_0f = num_of_float 0.
+let formula_print f = f |> Expr.to_string |> Format.printf "%s%!"
 
 (* ===== TERM ===== *)
 
 (* Constante True *)
-let term_true = Term.t_true
+let term_true = Expr.value Value.True
 
 (* Constante False *)
-let term_false = Term.t_false
+let term_false = Expr.value Value.False
 
 (* Constante Term 0 *)
-let term_0 = Term.make_int num_0
+let term_0 = Expr.value (Value.Int 0)
 
 (* Constante Term 0. *)
-let term_0f = Term.make_real num_0f
+let term_0f = Expr.value (Value.Real 0.)
 
 (* Constante Term 1 *)
-let term_1 = Term.make_int num_1
+let term_1 = Expr.value (Value.Int 1)
 
 (* Créer le terme Term d *)
-let term_int d = Term.make_int (Num.Int d)
+let term_int d = Expr.value (Value.Int d)
 
 (* Créer le terme Term f *)
-let term_real f = Term.make_real (num_of_float f)
+let term_real f = Expr.value (Value.Real f)
 
 (* Addition entre deux termes *)
-let term_add t1 t2 = Term.make_arith Term.Plus t1 t2
+let term_add_int t1 t2 = Expr.binop type_int Ty.Binop.Add t1 t2
 
-let ( +@ ) = term_add
+let ( +@ ) = term_add_int
+
+let term_add_real t1 t2 = Expr.binop type_real Ty.Binop.Add t1 t2
+
+let ( +.@ ) = term_add_real
+
+(* Négation d'un terme *)
+let term_neg_int t = Expr.unop type_int Ty.Unop.Neg t
+
+let term_neg_real t = Expr.unop type_real Ty.Unop.Neg t
 
 (* Soustraction entre deux termes *)
-let term_sub t1 t2 = Term.make_arith Term.Minus t1 t2
+let term_sub_int t1 t2 = Expr.binop type_int Ty.Binop.Sub t1 t2
 
-let ( -@ ) = term_sub
+let ( -@ ) = term_sub_int
+
+let term_sub_real t1 t2 = Expr.binop type_real Ty.Binop.Sub t1 t2
+
+let ( -.@ ) = term_sub_real
 
 (* Multiplication entre deux termes *)
-let term_mul t1 t2 = Term.make_arith Term.Mult t1 t2
+let term_mul_int t1 t2 = Expr.binop type_int Ty.Binop.Mul t1 t2
 
-let ( *@ ) = term_mul
+let ( *@ ) = term_add_int
+
+let term_mul_real t1 t2 = Expr.binop type_real Ty.Binop.Mul t1 t2
+
+let ( *.@ ) = term_add_real
 
 (* Division entre deux termes *)
-let term_div t1 t2 = Term.make_arith Term.Div t1 t2
+let term_div_int t1 t2 = Expr.binop type_int Ty.Binop.Div t1 t2
 
-let ( /@ ) = term_div
+let ( /@ ) = term_add_int
+
+let term_div_real t1 t2 = Expr.binop type_real Ty.Binop.Div t1 t2
+
+let ( /.@ ) = term_add_real
 
 (* Modulo entre deux termes *)
-let term_mod t1 t2 = Term.make_arith Term.Modulo t1 t2
+let term_mod t1 t2 =
+  match (Expr.ty t1, Expr.ty t2) with
+  | Ty.Ty_int, Ty.Ty_int -> Expr.binop type_int Ty.Binop.Rem t1 t2
+  | Ty.Ty_int, Ty.Ty_real | Ty.Ty_real, Ty.Ty_int | Ty.Ty_real, Ty.Ty_real ->
+    Expr.binop type_real Ty.Binop.Rem t1 t2
+  | _ -> assert false
+
 
 (* If-Then-Else entre une formule et deux termes *)
-let term_ite f1 t2 t3 = Term.make_ite f1 t2 t3
+let term_ite t1 t2 t3 = Expr.triop type_bool Ty.Triop.Ite t1 t2 t3
 
 (* Variable v *)
-let term_var v = Term.make_app v []
+let term_var v = Expr.symbol v
 
 (* ===== SYMBOLES ===== *)
 
 (* *)
-type symbol_diff = Smt.Term.t * int
+type symbol_diff = Expr.t * int
 
 let diff_init n d = (n, d)
 
@@ -203,9 +197,7 @@ let diff_extract (n, d) = n +@ term_int d
 (* Declare un symbole avec son num, son type d'entré et son type de retour *)
 let declare_symbol name ty =
   let name = fresh_name ~name () in
-  let x = Hstring.make name in
-  Symbol.declare x [] ty;
-  x
+  Symbol.make ty name
 
 
 (* Declare un symbole à partir d'une variable et d'un n donné *)
@@ -223,7 +215,7 @@ let get_symbol =
 (* ===== SOLVER ===== *)
 
 (* Notre solveur pour le cas de base *)
-module BMC_solver = Smt.Make (struct end)
+module BMC_solver = Solver.Batch (Z3_mappings)
 
 (* Notre solveur pour le cas inductif *)
-module IND_solver = Smt.Make (struct end)
+module IND_solver = Solver.Batch (Z3_mappings)

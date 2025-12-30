@@ -1,15 +1,6 @@
-all: install format build FORCE
-
-install:
-	@mkdir -p lib
-ifeq ("$(wildcard lib/aez)","")
-	@cd targz && tar xvfz aez.tar.gz
-	@mv targz/aez lib/aez
-else
-endif
+all: format build FORCE
 
 clean:
-	@rm -rf lmoch
 	@dune clean
 
 format:
@@ -17,8 +8,6 @@ format:
 
 build:
 	@dune build
-	@rm -rf lmoch
-	@cp _build/default/src/lmoch.exe lmoch
 
 fullclean: clean
 	@rm -rf lib/aez

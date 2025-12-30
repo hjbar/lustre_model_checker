@@ -81,12 +81,16 @@ and get_term_from_expr arr_length types n expr =
   | TE_ident { name; _ } ->
     let ty = Hashtbl.find types name in
     term_var (get_symbol name ty n)
-  | TE_op ((Op_add | Op_add_f), es) -> get_term_from_binop term_add es
+  | TE_op (Op_add, es) -> get_term_from_binop term_add_int es
+  | TE_op (Op_add_f, es) -> get_term_from_binop term_add_real es
   | TE_op (Op_sub, [ e ]) -> term_0 -@ get_term_from_expr_rec e
   | TE_op (Op_sub_f, [ e ]) -> term_0f -@ get_term_from_expr_rec e
-  | TE_op ((Op_sub | Op_sub_f), es) -> get_term_from_binop term_sub es
-  | TE_op ((Op_mul | Op_mul_f), es) -> get_term_from_binop term_mul es
-  | TE_op ((Op_div | Op_div_f), es) -> get_term_from_binop term_div es
+  | TE_op (Op_sub, es) -> get_term_from_binop term_sub_int es
+  | TE_op (Op_sub_f, es) -> get_term_from_binop term_sub_real es
+  | TE_op (Op_mul, es) -> get_term_from_binop term_mul_int es
+  | TE_op (Op_mul_f, es) -> get_term_from_binop term_mul_real es
+  | TE_op (Op_div, es) -> get_term_from_binop term_div_int es
+  | TE_op (Op_div_f, es) -> get_term_from_binop term_div_real es
   | TE_op (Op_mod, es) -> get_term_from_binop term_mod es
   | TE_op (Op_if, es) ->
     let t1, t2, t3 = es |> List.map get_term_from_expr_rec |> assume_3 in
@@ -216,9 +220,17 @@ let preprocess_node ({ tn_equs; _ } as node) =
 
 (* Solveur cas de base k-inductif (a k fixe) *)
 let get_base_case_k_inductive delta p k =
-  let assume = BMC_solver.assume ~id:k in
-  let entails = BMC_solver.entails ~id:k in
-  let check = BMC_solver.check in
+  let solver = BMC_solver.create () in
+  let context = ref [] in
+
+  let assume f =
+    context := f :: !context;
+    BMC_solver.add solver [ f ]
+  in
+  let check () =
+    if BMC_solver.check solver !context <> `Sat then failwith "Unsat context"
+  in
+  let entails f = BMC_solver.check solver [ formula_not f ] = `Unsat in
 
   for i = 0 to k - 1 do
     let delta_i = delta (diff_init (term_int i) 0) in
@@ -249,9 +261,17 @@ let get_base_case_k_inductive delta p k =
 
 (* Cas inductif pour k-induction (a k fixe) *)
 let get_ind_case_k_inductive delta p k =
-  let assume = IND_solver.assume ~id:k in
-  let entails = IND_solver.entails ~id:k in
-  let check = IND_solver.check in
+  let solver = BMC_solver.create () in
+  let context = ref [] in
+
+  let assume f =
+    context := f :: !context;
+    BMC_solver.add solver [ f ]
+  in
+  let check () =
+    if BMC_solver.check solver !context <> `Sat then failwith "Unsat context"
+  in
+  let entails f = BMC_solver.check solver [ formula_not f ] = `Unsat in
 
   let n = term_var (declare_symbol ("n_k_" ^ string_of_int k) type_int) in
 

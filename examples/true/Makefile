@@ -1,4 +1,4 @@
-LMOCH = ../../lmoch
+LMOCH = ../../_build/default/src/lmoch.exe
 NODE = check
 LUS_FILES := $(wildcard *.lus)
 
