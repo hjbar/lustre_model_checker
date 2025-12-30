@@ -5,24 +5,6 @@ open Ident
 
 (* ===== UTILS ===== *)
 
-(* Suppose que la liste fait 1 élément et les renvoie *)
-let assume_1 = function
-  | [ e1 ] -> e1
-  | _ -> assert false
-
-
-(* Suppose que la liste fait 2 éléments et les renvoie *)
-let assume_2 = function
-  | [ e1; e2 ] -> (e1, e2)
-  | _ -> assert false
-
-
-(* Suppose que la liste fait 3 éléments et les renvoie *)
-let assume_3 = function
-  | [ e1; e2; e3 ] -> (e1, e2, e3)
-  | _ -> assert false
-
-
 (* Renvoie true si on veut une formule pour cet opérateur dans le solveur, false sinon *)
 let require_formula expr =
   match expr.texpr_desc with

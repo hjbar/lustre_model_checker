@@ -1,3 +1,4 @@
+open Utils
 open Model_checking_utils
 open Typed_ast
 
