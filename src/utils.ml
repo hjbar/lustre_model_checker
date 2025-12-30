@@ -23,3 +23,12 @@ let assume_tuple expr =
   match expr.texpr_desc with
   | TE_tuple es -> es
   | _ -> assert false
+
+
+(* Donne un nom frais *)
+
+let fresh_name =
+  let cpt = ref ~-1 in
+  fun ?(name = "fresh") () ->
+    incr cpt;
+    Format.sprintf "$%s_%d" name !cpt

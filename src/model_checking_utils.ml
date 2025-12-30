@@ -1,3 +1,4 @@
+open Utils
 open Aez
 open Smt
 open Typed_ast
@@ -29,6 +30,21 @@ let asttype_to_smttype = function
   | Asttypes.Tbool -> type_bool
   | Asttypes.Tint -> type_int
   | Asttypes.Treal -> type_real
+
+
+let get_types_from_node aux { tn_input; tn_output; tn_local; _ } =
+  let types = Hashtbl.create 16 in
+  let get_type (id, ty) =
+    Hashtbl.replace types id.name (asttype_to_smttype ty)
+  in
+
+  List.iter get_type tn_input;
+  List.iter get_type tn_output;
+  List.iter get_type tn_local;
+
+  List.iter (fun (name, ty, _) -> Hashtbl.replace types name ty) aux;
+
+  types
 
 
 (* ===== FORMULA ===== *)
@@ -170,50 +186,38 @@ let term_mod t1 t2 = Term.make_arith Term.Modulo t1 t2
 (* If-Then-Else entre une formule et deux termes *)
 let term_ite f1 t2 t3 = Term.make_ite f1 t2 t3
 
-(* Application f(x) *)
-let term_app f x = Term.make_app f [ x ]
-
-(* Application f() *)
-let term_app_unit f = Term.make_app f []
+(* Variable v *)
+let term_var v = Term.make_app v []
 
 (* ===== SYMBOLES ===== *)
 
+(* *)
+type symbol_diff = Smt.Term.t * int
+
+let diff_init n d = (n, d)
+
+let diff_decr (n, d) = (n, d - 1)
+
+let diff_extract (n, d) = n +@ term_int d
+
 (* Declare un symbole avec son num, son type d'entré et son type de retour *)
-let declare_symbol name t_in t_out =
+let declare_symbol name ty =
+  let name = fresh_name ~name () in
   let x = Hstring.make name in
-  Symbol.declare x t_in t_out;
+  Symbol.declare x [] ty;
   x
 
 
-(* Declare un symbole à partir d'une variable *)
-let get_symbol_from_var ({ name; _ }, ty) =
-  declare_symbol name [ type_int ] (asttype_to_smttype ty)
-
-
-(* Declare un stmbole frais *)
-let get_fresh_symbol =
-  let cpt = ref ~-1 in
-  fun ty () ->
-    incr cpt;
-    let name = Format.sprintf "aux_%d" !cpt in
-    (name, declare_symbol name [ type_int ] (asttype_to_smttype ty))
-
-
-(* Declare des symboles à partir d'un noeud *)
-let get_symbols_from_node aux { tn_input; tn_output; tn_local; _ } :
-  (string, Aez.Smt.Symbol.t) Hashtbl.t =
+(* Declare un symbole à partir d'une variable et d'un n donné *)
+let get_symbol =
   let symbols = Hashtbl.create 16 in
-  let add_symbol ((id, _) as var) =
-    var |> get_symbol_from_var |> Hashtbl.replace symbols id.name
-  in
-
-  List.iter add_symbol tn_input;
-  List.iter add_symbol tn_output;
-  List.iter add_symbol tn_local;
-
-  List.iter (fun (name, symbol, _) -> Hashtbl.replace symbols name symbol) aux;
-
-  symbols
+  fun (name : string) ty (n : symbol_diff) ->
+    match Hashtbl.find_opt symbols (name, ty, n) with
+    | Some symbol_cached -> symbol_cached
+    | None ->
+      let symbol_cached = declare_symbol name ty in
+      Hashtbl.replace symbols (name, ty, n) symbol_cached;
+      symbol_cached
 
 
 (* ===== SOLVER ===== *)

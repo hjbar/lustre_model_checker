@@ -9,18 +9,22 @@ let debug = false
 (* Renvoie une formule du SMT correspondant à une expression donnée
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
 *)
-let rec get_formula_from_expr symbols n expr =
+let rec get_formula_from_expr types n expr =
+  let get_formula_from_lit = get_formula_from_lit types n in
+  let get_formula_from_unop = get_formula_from_unop types n in
+  let get_formula_from_binop = get_formula_from_binop types n in
+
   match expr.texpr_desc with
-  | TE_op (Op_eq, es) -> get_formula_from_lit symbols n formula_eq es
-  | TE_op (Op_neq, es) -> get_formula_from_lit symbols n formula_neq es
-  | TE_op (Op_lt, es) -> get_formula_from_lit symbols n formula_lt es
-  | TE_op (Op_le, es) -> get_formula_from_lit symbols n formula_le es
-  | TE_op (Op_gt, es) -> get_formula_from_lit symbols n formula_gt es
-  | TE_op (Op_ge, es) -> get_formula_from_lit symbols n formula_ge es
-  | TE_op (Op_not, es) -> get_formula_from_unop symbols n formula_not es
-  | TE_op (Op_and, es) -> get_formula_from_binop symbols n formula_and es
-  | TE_op (Op_or, es) -> get_formula_from_binop symbols n formula_or es
-  | TE_op (Op_impl, es) -> get_formula_from_binop symbols n formula_imp es
+  | TE_op (Op_eq, es) -> get_formula_from_lit formula_eq es
+  | TE_op (Op_neq, es) -> get_formula_from_lit formula_neq es
+  | TE_op (Op_lt, es) -> get_formula_from_lit formula_lt es
+  | TE_op (Op_le, es) -> get_formula_from_lit formula_le es
+  | TE_op (Op_gt, es) -> get_formula_from_lit formula_gt es
+  | TE_op (Op_ge, es) -> get_formula_from_lit formula_ge es
+  | TE_op (Op_not, es) -> get_formula_from_unop formula_not es
+  | TE_op (Op_and, es) -> get_formula_from_binop formula_and es
+  | TE_op (Op_or, es) -> get_formula_from_binop formula_or es
+  | TE_op (Op_impl, es) -> get_formula_from_binop formula_imp es
   | _ ->
     Format.printf "Cash on this expression :@.";
     Typed_ast_printer.print_exp Format.std_formatter expr;
@@ -31,25 +35,25 @@ let rec get_formula_from_expr symbols n expr =
 (* Renvoie un formule du SMT correspondant à une expression transformée donnée
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
 *)
-and get_formula_from_expr_transformer symbols n e =
-  if require_formula e then get_formula_from_expr symbols n e
-  else get_term_from_expr 0 symbols n e =@ term_true
+and get_formula_from_expr_transformer types n e =
+  if require_formula e then get_formula_from_expr types n e
+  else get_term_from_expr 0 types n e =@ term_true
 
 
 (* Renvoie une formule du SMT correspondant à une expression unop donnée
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
 *)
-and get_formula_from_unop symbols n unop es =
-  let f = es |> assume_1 |> get_formula_from_expr_transformer symbols n in
+and get_formula_from_unop types n unop es =
+  let f = es |> assume_1 |> get_formula_from_expr_transformer types n in
   unop f
 
 
 (* Renvoie une formule du SMT correspondant à une expression binop donnée
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
 *)
-and get_formula_from_binop symbols n binop es =
+and get_formula_from_binop types n binop es =
   let f1, f2 =
-    es |> List.map (get_formula_from_expr_transformer symbols n) |> assume_2
+    es |> List.map (get_formula_from_expr_transformer types n) |> assume_2
   in
   binop f1 f2
 
@@ -57,32 +61,35 @@ and get_formula_from_binop symbols n binop es =
 (* Renvoie une formule du SMT correspondant à une expression littérale donnée
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
 *)
-and get_formula_from_lit symbols n op es =
-  let e1, e2 = es |> List.map (get_term_from_expr 0 symbols n) |> assume_2 in
+and get_formula_from_lit types n op es =
+  let e1, e2 = es |> List.map (get_term_from_expr 0 types n) |> assume_2 in
   op e1 e2
 
 
 (* Renvoie un terme du SMT correspondant à une expression donnée
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
 *)
-and get_term_from_expr arr_length symbols n expr =
+and get_term_from_expr arr_length types n expr =
+  let get_term_from_binop = get_term_from_binop types n in
+  let get_term_from_expr_rec = get_term_from_expr 0 types n in
+
   match expr.texpr_desc with
   | TE_const (Cbool false) -> term_false
   | TE_const (Cbool true) -> term_true
   | TE_const (Cint d) -> term_int d
   | TE_const (Creal r) -> term_real r
-  | TE_ident { name; _ } -> term_app (Hashtbl.find symbols name) n
-  | TE_op ((Op_add | Op_add_f), es) -> get_term_from_binop symbols n term_add es
-  | TE_op (Op_sub, [ e ]) -> term_0 -@ get_term_from_expr 0 symbols n e
-  | TE_op (Op_sub_f, [ e ]) -> term_0f -@ get_term_from_expr 0 symbols n e
-  | TE_op ((Op_sub | Op_sub_f), es) -> get_term_from_binop symbols n term_sub es
-  | TE_op ((Op_mul | Op_mul_f), es) -> get_term_from_binop symbols n term_mul es
-  | TE_op ((Op_div | Op_div_f), es) -> get_term_from_binop symbols n term_div es
-  | TE_op (Op_mod, es) -> get_term_from_binop symbols n term_mod es
+  | TE_ident { name; _ } ->
+    let ty = Hashtbl.find types name in
+    term_var (get_symbol name ty n)
+  | TE_op ((Op_add | Op_add_f), es) -> get_term_from_binop term_add es
+  | TE_op (Op_sub, [ e ]) -> term_0 -@ get_term_from_expr_rec e
+  | TE_op (Op_sub_f, [ e ]) -> term_0f -@ get_term_from_expr_rec e
+  | TE_op ((Op_sub | Op_sub_f), es) -> get_term_from_binop term_sub es
+  | TE_op ((Op_mul | Op_mul_f), es) -> get_term_from_binop term_mul es
+  | TE_op ((Op_div | Op_div_f), es) -> get_term_from_binop term_div es
+  | TE_op (Op_mod, es) -> get_term_from_binop term_mod es
   | TE_op (Op_if, es) ->
-    let t1, t2, t3 =
-      es |> List.map (get_term_from_expr 0 symbols n) |> assume_3
-    in
+    let t1, t2, t3 = es |> List.map get_term_from_expr_rec |> assume_3 in
     term_ite (t1 =@ term_true) t2 t3
   | TE_prim ({ name; _ }, es) when name = "int_of_real" ->
     ignore es;
@@ -92,10 +99,10 @@ and get_term_from_expr arr_length symbols n expr =
     failwith "TODO-real_of_int"
   | TE_arrow (e1, e2) ->
     term_ite
-      (n =@ term_int arr_length)
-      (get_term_from_expr 0 symbols n e1)
-      (get_term_from_expr (arr_length + 1) symbols n e2)
-  | TE_pre e -> get_term_from_expr 0 symbols (n -@ term_1) e
+      (diff_extract n =@ term_int arr_length)
+      (get_term_from_expr_rec e1)
+      (get_term_from_expr (arr_length + 1) types n e2)
+  | TE_pre e -> get_term_from_expr 0 types (diff_decr n) e
   | TE_prim _ -> assert false
   | TE_app _ -> assert false
   | TE_tuple _ -> assert false
@@ -109,32 +116,33 @@ and get_term_from_expr arr_length symbols n expr =
 (* Renvoie une formule du SMT correspondant à une expression binop donnée
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier et l'opération du SMT
 *)
-and get_term_from_binop symbols n binop es =
-  let t1, t2 = es |> List.map (get_term_from_expr 0 symbols n) |> assume_2 in
+and get_term_from_binop types n binop es =
+  let t1, t2 = es |> List.map (get_term_from_expr 0 types n) |> assume_2 in
   binop t1 t2
 
 
 (* Obtient une definition pour le SMT à partir d'un ensemble d'équations
    Pré-condition : ne pas avoir de tuples dans les équations
 *)
-let get_def_from_eqs symbols aux eqs =
+let get_def_from_eqs types aux eqs =
   let defs =
     List.map
       begin fun { teq_patt; teq_expr } ->
         let def_name = (List.hd teq_patt.tpatt_desc).name in
+        let def_type = Hashtbl.find types def_name in
         fun n ->
-          term_app (Hashtbl.find symbols def_name) n
-          =@ get_term_from_expr 0 symbols n teq_expr
+          term_var (get_symbol def_name def_type n)
+          =@ get_term_from_expr 0 types n teq_expr
       end
       eqs
   in
 
   let defs_aux =
     List.map
-      begin fun (_, symbol, expr) ->
+      begin fun (name, ty, expr) ->
         fun n ->
-         let aux_def = term_app symbol n =@ term_true in
-         let expr_def = get_formula_from_expr symbols n expr in
+         let aux_def = term_var (get_symbol name ty n) =@ term_true in
+         let expr_def = get_formula_from_expr types n expr in
 
          formula_imp aux_def expr_def &&@ formula_imp expr_def aux_def
       end
@@ -151,9 +159,10 @@ let get_def_from_eqs symbols aux eqs =
    La définition p assure qu'on veut que la propriété OK soit vraie
 *)
 let get_defs_from_node aux ({ tn_equs; _ } as node) =
-  let symbols = get_symbols_from_node aux node in
-  let delta_def = get_def_from_eqs symbols aux tn_equs in
-  let p_def n = term_app (Hashtbl.find symbols "OK") n =@ term_true in
+  let types = get_types_from_node aux node in
+  let delta_def = get_def_from_eqs types aux tn_equs in
+  let p_typ = Hashtbl.find types "OK" in
+  let p_def n = term_var (get_symbol "OK" p_typ n) =@ term_true in
   (delta_def, p_def)
 
 
@@ -166,8 +175,9 @@ let rec preprocess_expr ({ texpr_desc; _ } as expr) =
     | TE_op (op, es) when require_formula expr ->
       let aux, es = es |> List.map preprocess_expr |> List.split in
       let expr = { expr with texpr_desc = TE_op (op, es) } in
-      let aux_name, aux_symbol = get_fresh_symbol Asttypes.Tbool () in
-      let aux_tuple = (aux_name, aux_symbol, expr) in
+      let aux_name = fresh_name ~name:"aux" () in
+      let aux_type = type_bool in
+      let aux_tuple = (aux_name, aux_type, expr) in
       let id = Ident.make aux_name Stream in
       (List.flatten ([ aux_tuple ] :: aux), TE_ident id)
     | TE_const _ | TE_ident _ -> ([], texpr_desc)
@@ -211,7 +221,7 @@ let get_base_case_k_inductive delta p k =
   let check = BMC_solver.check in
 
   for i = 0 to k - 1 do
-    let delta_i = delta (term_int i) in
+    let delta_i = delta (diff_init (term_int i) 0) in
     if debug then begin
       Format.printf "delta_%d =\n\t%!" i;
       formula_print delta_i;
@@ -223,8 +233,8 @@ let get_base_case_k_inductive delta p k =
 
   let final_p =
     match k with
-    | 1 -> p term_0
-    | _ -> formula_ands (List.init k (fun i -> p (term_int i)))
+    | 1 -> p (diff_init term_0 0)
+    | _ -> formula_ands (List.init k (fun i -> p (diff_init (term_int i) 0)))
   in
   if debug then begin
     Format.printf "final_p =\n\t%!";
@@ -243,16 +253,28 @@ let get_ind_case_k_inductive delta p k =
   let entails = IND_solver.entails ~id:k in
   let check = IND_solver.check in
 
-  let n =
-    term_app_unit (declare_symbol ("n_k_" ^ string_of_int k) [] type_int)
-  in
+  let n = term_var (declare_symbol ("n_k_" ^ string_of_int k) type_int) in
 
-  assume (term_0 <=@ n);
-  assume (delta n);
-  assume (p n);
+  let cond = term_0 <=@ n in
+  let delta_n = delta (diff_init n 0) in
+  let p_n = p (diff_init n 0) in
+  if debug then begin
+    Format.printf "cond =\n\t%!";
+    formula_print cond;
+    Format.printf "\n\n%!";
+    Format.printf "delta_n =\n\t%!";
+    formula_print delta_n;
+    Format.printf "\n\n%!";
+    Format.printf "p_n =\n\t%!";
+    formula_print p_n;
+    Format.printf "\n\n%!"
+  end;
+  assume cond;
+  assume delta_n;
+  assume p_n;
 
   for i = 1 to k do
-    let delta_k = delta (n +@ term_int i) in
+    let delta_k = delta (diff_init n i) in
     if debug then begin
       Format.printf "delta_n+%d =\n\t%!" i;
       formula_print delta_k;
@@ -262,7 +284,7 @@ let get_ind_case_k_inductive delta p k =
   done;
 
   for i = 1 to k - 1 do
-    let p_i = p (n +@ term_int i) in
+    let p_i = p (diff_init n i) in
     if debug then begin
       Format.printf "p_n+%d =\n\t%!" i;
       formula_print p_i;
@@ -272,7 +294,7 @@ let get_ind_case_k_inductive delta p k =
   done;
   check ();
 
-  let p_k = p (n +@ term_int k) in
+  let p_k = p (diff_init n k) in
   if debug then begin
     Format.printf "p_n+%d =\n\t%!" k;
     formula_print p_k;
