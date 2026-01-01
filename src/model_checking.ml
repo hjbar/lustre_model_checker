@@ -339,26 +339,7 @@ let get_base_case_k_inductive delta p k =
 
 (* ===== CAS INDUCTIF ===== *)
 
-(* Définit le cas inductif *)
-let get_ind_case delta p =
-  let assume = IND_solver.assume ~id:0 in
-  let entails = IND_solver.entails ~id:0 in
-  let check = IND_solver.check in
-
-  let n = term_app_unit (declare_symbol "n" [] type_int) in
-  let sn = n +@ term_1 in
-
-  assume (term_0 <=@ n);
-  assume (delta n);
-  assume (delta sn);
-  assume (p n);
-  check ();
-
-  entails (p sn)
-
-
-(* Cas inductif pour k-induction (a k fixe)*)
-
+(* Cas inductif pour k-induction (a k fixe) *)
 let get_ind_case_k_inductive delta init state_symbols p k =
   let assume = IND_solver.assume ~id:k in
   let entails = IND_solver.entails ~id:k in
@@ -368,9 +349,23 @@ let get_ind_case_k_inductive delta init state_symbols p k =
     term_app_unit (declare_symbol ("n_k_" ^ string_of_int k) [] type_int)
   in
 
-  assume (term_0 <=@ n);
-  assume (delta n);
-  assume (p n);
+  let cond = term_0 <=@ n in
+  let delta_n = delta n in
+  let p_n = p n in
+  if debug then begin
+    Format.printf "cond =\n\t%!";
+    formula_print cond;
+    Format.printf "\n\n%!";
+    Format.printf "delta_n =\n\t%!";
+    formula_print delta_n;
+    Format.printf "\n\n%!";
+    Format.printf "p_n =\n\t%!";
+    formula_print p_n;
+    Format.printf "\n\n%!"
+  end;
+  assume cond;
+  assume delta_n;
+  assume p_n;
 
   for i = 1 to k + 1 do
     let delta_k = delta (n +@ term_int i) in
@@ -394,12 +389,24 @@ let get_ind_case_k_inductive delta init state_symbols p k =
 
   if state_symbols <> [] then begin
     let cnk_formula = cnk n delta k state_symbols init in
+    if debug then begin
+      Format.printf "cnk_formula =\n\t%!";
+      formula_print cnk_formula;
+      Format.printf "\n\n%!"
+    end;
     assume cnk_formula
   end;
 
-  if debug then Format.printf "Checking entailment for k=%d@." k;
   check ();
-  entails (p (n +@ term_int (k + 1)))
+
+  let p_sk = p (n +@ term_int (k + 1)) in
+  if debug then begin
+    Format.printf "p_n+%d =\n\t%!" k;
+    formula_print p_sk;
+    Format.printf "\n\n%!"
+  end;
+  if debug then Format.printf "Checking entailment for k=%d@." k;
+  entails p_sk
 
 
 let check_no_loop_path state_symbols init delta k =
