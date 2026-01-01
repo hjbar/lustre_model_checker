@@ -4,8 +4,6 @@ open Format
 open Lexing
 open Lexer
 
-let debug = false
-
 let usage = "usage: " ^ Sys.argv.(0) ^ " [options] file.lus main"
 
 let parse_only = ref false
@@ -81,7 +79,6 @@ let () =
     if main_node = "" then exit 0;
 
     let main_node_inlined = Inlining.inline ft main_node in
-    if debug then Typed_ast_printer.print_node_list_std [ main_node_inlined ];
     Model_checking.check main_node_inlined;
     exit 0
   with

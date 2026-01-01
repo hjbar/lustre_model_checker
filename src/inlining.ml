@@ -31,6 +31,8 @@ open Inlining_utils
 open Typed_ast
 open Ident
 
+let debug = false
+
 (* ===== RENAMING ===== *)
 
 (* Renvoie un ident frais à partir d'un ident donné
@@ -40,7 +42,6 @@ open Ident
 *)
 let rename_ident, reset_rename_ident =
   let fresh_idents = Hashtbl.create 16 in
-  let cpt = ref ~-1 in
 
   let rename_ident ident =
     if ident.name = "OK" then ident
@@ -48,8 +49,7 @@ let rename_ident, reset_rename_ident =
       match Hashtbl.find_opt fresh_idents ident with
       | Some fresh_ident -> fresh_ident
       | None ->
-        incr cpt;
-        let fresh_name = Format.sprintf "id%d_%s" !cpt ident.name in
+        let fresh_name = fresh_name ~prefix:"id" ~name:ident.name () in
         let fresh_ident = Ident.make fresh_name ident.kind in
         Hashtbl.replace fresh_idents ident fresh_ident;
         fresh_ident
@@ -270,11 +270,9 @@ let inline_tuples_node ({ tn_equs; _ } as node) =
 
 (* Renvoie un nom frais pour la normalisation *)
 let pre_norm_fresh_ident =
-  let cpt = ref ~-1 in
-  fun () ->
-    incr cpt;
-    let fresh_name = Format.sprintf "pre_norm_id%d" !cpt in
-    Ident.make fresh_name Ident.Stream
+ fun () ->
+  let fresh_name = fresh_name ~prefix:"pre_norm_id" () in
+  Ident.make fresh_name Ident.Stream
 
 
 (* Renvoie une expression normalisée à partir d'une expression donnée
@@ -359,4 +357,5 @@ let inline program main =
   in
   let main_node = inline_tuples_node main_node in
   let main_node = normalize_pre_node main_node in
+  if debug then Typed_ast_printer.print_node_list_std [ main_node ];
   main_node

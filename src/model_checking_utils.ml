@@ -1,3 +1,4 @@
+open Utils
 open Aez
 open Smt
 open Typed_ast
@@ -18,10 +19,13 @@ let require_formula expr =
 
 (* ===== TYPES ===== *)
 
+(* Type bool du SMT *)
 let type_bool = Type.type_bool
 
+(* Type int du SMT *)
 let type_int = Type.type_int
 
+(* Type real du SMT *)
 let type_real = Type.type_real
 
 (* Conversion d'un type Lustre en un type Alt-Ergo *)
@@ -33,8 +37,11 @@ let asttype_to_smttype = function
 
 (* ===== FORMULA ===== *)
 
-(* Constante True *)
+(* Formule True *)
 let formula_true = Formula.f_true
+
+(* Formule False *)
+let formula_false = Formula.f_false
 
 (* Négation d'une formule *)
 let formula_not f = Formula.make Formula.Not [ f ]
@@ -79,9 +86,9 @@ let formula_ands fs = Formula.make Formula.And fs
 (* Disjonction entre deux formules *)
 let formula_or f1 f2 = Formula.make Formula.Or [ f1; f2 ]
 
-let formula_ors fs = Formula.make Formula.Or fs
-
 let ( ||@ ) = formula_or
+
+let formula_ors fs = Formula.make Formula.Or fs
 
 (* Implication entre deux formules *)
 let formula_imp f1 f2 = Formula.make Formula.Imp [ f1; f2 ]
@@ -197,11 +204,9 @@ let get_symbol_from_var ({ name; _ }, ty) =
 
 (* Declare un stmbole frais *)
 let get_fresh_symbol =
-  let cpt = ref ~-1 in
-  fun ty () ->
-    incr cpt;
-    let name = Format.sprintf "aux_%d" !cpt in
-    (name, declare_symbol name [ type_int ] (asttype_to_smttype ty))
+ fun ty () ->
+  let name = fresh_name ~name:"aux" () in
+  (name, declare_symbol name [ type_int ] (asttype_to_smttype ty))
 
 
 (* Declare des symboles à partir d'un noeud *)

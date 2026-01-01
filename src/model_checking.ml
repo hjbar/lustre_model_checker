@@ -6,8 +6,7 @@ let debug = false
 
 (* ===== Variables d'Etat ===== *)
 
-(* Renvoie la liste des variables d'état d'un noeud *)
-
+(* Renvoie la liste des variables d'état d'une expression *)
 let rec get_state_vars_from_expr seen state_vars { texpr_desc; _ } =
   match texpr_desc with
   | TE_const _ -> ()
@@ -24,16 +23,18 @@ let rec get_state_vars_from_expr seen state_vars { texpr_desc; _ } =
         Hashtbl.add seen name ();
         state_vars := name :: !state_vars
       end
-    | _ -> assert false (*Le noeud doit être "pre"-normalisé*)
+    | _ -> assert false (* Le noeud doit être "pre"-normalisé *)
   end
   | TE_tuple _ -> assert false
 
 
+(* Renvoie la liste des variables d'état d'une équation *)
 let get_state_vars_from_eqs seen state_vars { teq_expr; _ } =
   get_state_vars_from_expr seen state_vars teq_expr
 
 
-let get_state_vars_from_node { tn_equs; _ } : string list =
+(* Renvoie la liste des variables d'état d'un noeud *)
+let get_state_vars_from_node { tn_equs; _ } =
   let seen = Hashtbl.create 16 in
   let state_vars = ref [] in
 
@@ -59,7 +60,7 @@ let rec get_formula_from_expr symbols n expr =
   | TE_op (Op_or, es) -> get_formula_from_binop symbols n formula_or es
   | TE_op (Op_impl, es) -> get_formula_from_binop symbols n formula_imp es
   | _ ->
-    Format.printf "Cash on this expression :@.";
+    Format.printf "Clash on this expression :@.";
     Typed_ast_printer.print_exp Format.std_formatter expr;
     Format.printf "\n%!";
     failwith "We can't make a FORMULA form this expression\n%!"
@@ -142,7 +143,7 @@ and get_term_from_expr arr_length symbols n expr =
   | TE_app _ -> assert false
   | TE_prim _ -> assert false
   | TE_op _ ->
-    Format.printf "Cash on this expression :@.";
+    Format.printf "Clash on this expression :@.";
     Typed_ast_printer.print_exp Format.std_formatter expr;
     Format.printf "\n%!";
     failwith "We can't make a TERM form this expression\n%!"
@@ -159,9 +160,7 @@ and get_term_from_binop symbols n binop es =
 (* Obtient une definition pour le SMT à partir d'un ensemble d'équations
    Pré-condition : ne pas avoir de tuples dans les équations
 *)
-let get_def_from_eqs state_vars symbols aux eqs :
-  (Aez.Smt.Term.t -> Aez.Smt.Formula.t) * (Aez.Smt.Term.t -> Aez.Smt.Formula.t)
-    =
+let get_def_from_eqs state_vars symbols aux eqs =
   let defs =
     List.map
       begin fun { teq_patt; teq_expr } ->
@@ -193,30 +192,20 @@ let get_def_from_eqs state_vars symbols aux eqs :
           if List.mem def_name state_vars then fun n ->
             let curr_symbol = Hashtbl.find symbols def_name in
             term_app curr_symbol n =@ term_app curr_symbol term_0
-          else fun _ -> Model_checking_utils.formula_true
+          else fun _ -> formula_true
         end
         eqs
-    else [ (fun _ -> Model_checking_utils.formula_true) ]
+    else [ (fun _ -> formula_true) ]
   in
 
   let final_defs = defs @ defs_aux in
-
-  let delta =
-   fun n ->
-    Model_checking_utils.formula_ands (List.map (fun def -> def n) final_defs)
-  in
-
-  let init =
-   fun n ->
-    Model_checking_utils.formula_ands (List.map (fun def -> def n) init_defs)
-  in
-
+  let delta = fun n -> formula_ands (List.map (fun def -> def n) final_defs) in
+  let init = fun n -> formula_ands (List.map (fun def -> def n) init_defs) in
   (delta, init)
 
 
-let get_symbol_from_var_names
-  (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) var_names :
-  Aez.Smt.Symbol.t list =
+(* Renvoie les symboles à paritr des variables *)
+let get_symbol_from_var_names symbols var_names =
   List.map (fun name -> Hashtbl.find symbols name) var_names
 
 
@@ -226,18 +215,12 @@ let get_symbol_from_var_names
    La définition delta correspond à la conjonction des définitions des équations du noeud
    La définition p assure qu'on veut que la propriété OK soit vraie
 *)
-let get_defs_from_node state_vars aux ({ tn_equs; _ } as node) :
-  (Aez.Smt.Term.t -> Aez.Smt.Formula.t)
-  * (Aez.Smt.Term.t -> Aez.Smt.Formula.t)
-  * (Aez.Smt.Term.t -> Aez.Smt.Formula.t)
-  * Aez.Smt.Symbol.t list =
+let get_defs_from_node state_vars aux ({ tn_equs; _ } as node) =
   let symbols = get_symbols_from_node aux node in
-  let _state_symbols = get_symbol_from_var_names symbols state_vars in
+  let state_symbols = get_symbol_from_var_names symbols state_vars in
   let delta_def, init = get_def_from_eqs state_vars symbols aux tn_equs in
-  let p_def n =
-    term_app (Hashtbl.find symbols "OK") n =@ Model_checking_utils.term_true
-  in
-  (delta_def, p_def, init, _state_symbols)
+  let p_def n = term_app (Hashtbl.find symbols "OK") n =@ term_true in
+  (delta_def, p_def, init, state_symbols)
 
 
 (* ===== PRÉ-PROCESS ===== *)
@@ -304,11 +287,11 @@ let term_diff_state state_symbols i j =
         end
         state_symbols
     in
-    Model_checking_utils.formula_ors diffs
+    formula_ors diffs
 
 
 let cnk n delta k state_symbols init =
-  let formula = ref Model_checking_utils.formula_true in
+  let formula = ref formula_true in
   for i = 0 to k do
     for j = i + 1 to k do
       let diff_ij =
@@ -343,9 +326,7 @@ let get_base_case_k_inductive delta p k =
   let final_p =
     match k with
     | 1 -> p term_0
-    | _ ->
-      Model_checking_utils.formula_ands
-        (List.init (k + 1) (fun i -> p (term_int i)))
+    | _ -> formula_ands (List.init (k + 1) (fun i -> p (term_int i)))
   in
   if debug then begin
     Format.printf "final_p =\n\t%!";
@@ -360,9 +341,9 @@ let get_base_case_k_inductive delta p k =
 
 (* Définit le cas inductif *)
 let get_ind_case delta p =
-  let assume = Model_checking_utils.IND_solver.assume ~id:0 in
-  let entails = Model_checking_utils.IND_solver.entails ~id:0 in
-  let check = Model_checking_utils.IND_solver.check in
+  let assume = IND_solver.assume ~id:0 in
+  let entails = IND_solver.entails ~id:0 in
+  let check = IND_solver.check in
 
   let n = term_app_unit (declare_symbol "n" [] type_int) in
   let sn = n +@ term_1 in
@@ -378,7 +359,7 @@ let get_ind_case delta p =
 
 (* Cas inductif pour k-induction (a k fixe)*)
 
-let get_ind_case_k_inductive delta init _state_symbols p k =
+let get_ind_case_k_inductive delta init state_symbols p k =
   let assume = IND_solver.assume ~id:k in
   let entails = IND_solver.entails ~id:k in
   let check = IND_solver.check in
@@ -411,14 +392,12 @@ let get_ind_case_k_inductive delta init _state_symbols p k =
     assume p_i
   done;
 
-  if _state_symbols <> [] then begin
-    let cnk_formula = cnk n delta k _state_symbols init in
-    (* Formula.print Format.std_formatter cnk_formula;
-    Format.printf "\n%!"; *)
+  if state_symbols <> [] then begin
+    let cnk_formula = cnk n delta k state_symbols init in
     assume cnk_formula
   end;
 
-  Format.printf "Checking entailment for k=%d@." k;
+  if debug then Format.printf "Checking entailment for k=%d@." k;
   check ();
   entails (p (n +@ term_int (k + 1)))
 
@@ -442,19 +421,19 @@ let check_no_loop_path state_symbols init delta k =
 
 (* ===== CHECKING ===== *)
 
-let k_loop_compr delta init p k _state_symbols =
-  (*assume que _state_symbols est non vide*)
+let k_loop_compr delta init p k state_symbols =
+  (* assume que _state_symbols est non vide *)
   for i = 1 to k do
     Format.printf "Checking k-inductive with loop compression for k=%d@." i;
     if not (get_base_case_k_inductive delta p i) then begin
       Format.printf "\027[31mFALSE PROPERTY at base case k=%d\027[0m@." i;
       exit 0
     end
-    else if get_ind_case_k_inductive delta init _state_symbols p i then begin
+    else if get_ind_case_k_inductive delta init state_symbols p i then begin
       Format.printf "\027[32mTRUE PROPERTY at k=%d\027[0m@." i;
       exit 0
     end
-    else if check_no_loop_path _state_symbols init delta i then begin
+    else if check_no_loop_path state_symbols init delta i then begin
       Format.printf
         "\027[33m TRUE PROPERTY (by loop compression) at k=%d\027[0m@." i;
       exit 0
@@ -480,10 +459,13 @@ let k_loop delta init p k =
 
 let check node =
   let k = 20 in
-  let state_vars = get_state_vars_from_node node in
-  List.iter (fun v -> Format.printf "State var: %s@." v) state_vars;
-  let aux, node = preprocess_node node in
-  let delta, p, init, _state_symbols = get_defs_from_node state_vars aux node in
 
-  if _state_symbols <> [] then k_loop_compr delta init p k _state_symbols
+  let state_vars = get_state_vars_from_node node in
+  if debug then
+    List.iter (fun v -> Format.printf "State var: %s@." v) state_vars;
+
+  let aux, node = preprocess_node node in
+  let delta, p, init, state_symbols = get_defs_from_node state_vars aux node in
+
+  if state_symbols <> [] then k_loop_compr delta init p k state_symbols
   else k_loop delta init p k
