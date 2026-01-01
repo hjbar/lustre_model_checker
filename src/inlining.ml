@@ -26,35 +26,10 @@
 
 *)
 
+open Utils
+open Inlining_utils
 open Typed_ast
 open Ident
-
-(* ===== UTILS ===== *)
-
-(* Renvoie True si la liste possède au moins deux éléments, False sinon *)
-let have_to_inline = function
-  | [] | [ _ ] -> false
-  | _ -> true
-
-
-let assume_1 = function
-  | [ e1 ] -> e1
-  | _ -> assert false
-
-
-(* Renvoie une Hashtbl des noms vers leur noeud *)
-let hashtbl_from_program nodes =
-  let ht = Hashtbl.create 16 in
-  List.iter (fun node -> Hashtbl.replace ht node.tn_name.name node) nodes;
-  ht
-
-
-(* Renvoie les éléments d'un tuple *)
-let assume_tuple expr =
-  match expr.texpr_desc with
-  | TE_tuple es -> es
-  | _ -> assert false
-
 
 (* ===== RENAMING ===== *)
 
