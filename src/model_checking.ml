@@ -222,15 +222,21 @@ let check node =
   let k = 20 in
   let delta, p = get_defs_from_node node in
 
-  for i = 1 to k do
-    Format.printf "Checking k-inductive for k=%d@." i;
-    if not (get_base_case_k_inductive delta p i) then begin
-      Format.printf "\027[31mFALSE PROPERTY at base case k=%d\027[0m@." i;
-      exit 0
-    end
-    else if get_ind_case_k_inductive delta p i then begin
-      Format.printf "\027[32mTRUE PROPERTY at k=%d\027[0m@." i;
-      exit 0
-    end
-  done;
-  Format.printf "\027[34mDon't know after k=%d\027[0m@." k
+  try
+    for i = 1 to k do
+      Format.printf "Checking k-inductive for k=%d@." i;
+      if not (get_base_case_k_inductive delta p i) then begin
+        Format.printf "\027[31mFALSE PROPERTY at base case k=%d\027[0m@." i;
+        exit 0
+      end
+      else if get_ind_case_k_inductive delta p i then begin
+        Format.printf "\027[32mTRUE PROPERTY at k=%d\027[0m@." i;
+        exit 0
+      end
+    done;
+    Format.printf "\027[34mDon't know after k=%d\027[0m@." k
+  with e ->
+    (* Affiche l'exception et la backtrace actuelle manuellement *)
+    Printexc.print_backtrace stderr;
+    Format.eprintf "Erreur capturée : %s@." (Printexc.to_string e);
+    raise e
