@@ -35,10 +35,20 @@ let get_types_from_node { tn_input; tn_output; tn_local; _ } =
   types
 
 
+(* Renvoie le type d'un term *)
+let get_type t = Expr.ty t
+
+(* Check la compatibilité des types et le renvoie *)
+let check_type t1 t2 =
+  let ty1 = get_type t1 in
+  if ty1 <> get_type t2 then failwith "Incompatible types";
+  ty1
+
+
 (* ===== FORMULA ===== *)
 
 (* Négation d'une formule *)
-let term_not f = Expr.raw_unop type_bool Ty.Unop.Not f
+let term_not t = Expr.raw_unop type_bool Ty.Unop.Not t
 
 (* Égalité entre deux termes *)
 let term_eq t1 t2 = Expr.raw_relop type_bool Ty.Relop.Eq t1 t2
@@ -51,27 +61,39 @@ let term_neq t1 t2 = Expr.raw_relop type_bool Ty.Relop.Ne t1 t2
 let ( <>@ ) = term_neq
 
 (* Inférieur ou égal pour deux termes *)
-let term_le t1 t2 = Expr.raw_relop type_int Ty.Relop.Le t1 t2
+let term_le t1 t2 =
+  let ty = check_type t1 t2 in
+  Expr.raw_relop ty Ty.Relop.Le t1 t2
+
 
 let ( <=@ ) = term_le
 
 (* Strictement inférieur pour deux termes *)
-let term_lt t1 t2 = Expr.raw_relop type_int Ty.Relop.Lt t1 t2
+let term_lt t1 t2 =
+  let ty = check_type t1 t2 in
+  Expr.raw_relop ty Ty.Relop.Lt t1 t2
+
 
 let ( <@ ) = term_lt
 
 (* Strictement supérieur pour deux termes *)
-let term_gt t1 t2 = Expr.raw_relop type_int Ty.Relop.Gt t1 t2
+let term_gt t1 t2 =
+  let ty = check_type t1 t2 in
+  Expr.raw_relop ty Ty.Relop.Gt t1 t2
+
 
 let ( >@ ) = term_gt
 
 (* Supérieur ou égal pour deux termes *)
-let term_ge t1 t2 = Expr.raw_relop type_int Ty.Relop.Ge t1 t2
+let term_ge t1 t2 =
+  let ty = check_type t1 t2 in
+  Expr.raw_relop ty Ty.Relop.Ge t1 t2
+
 
 let ( >=@ ) = term_ge
 
 (* Conjonction entre deux formules *)
-let term_and f1 f2 = Expr.raw_binop type_bool Ty.Binop.And f1 f2
+let term_and t1 t2 = Expr.raw_binop type_bool Ty.Binop.And t1 t2
 
 let ( &&@ ) = term_and
 
@@ -83,15 +105,15 @@ let rec term_ands = function
 
 
 (* Disjonction entre deux formules *)
-let term_or f1 f2 = Expr.raw_binop type_bool Ty.Binop.Or f1 f2
+let term_or t1 t2 = Expr.raw_binop type_bool Ty.Binop.Or t1 t2
 
 let ( ||@ ) = term_or
 
 (* Implication entre deux formules *)
-let term_imp f1 f2 = Expr.raw_binop type_bool Ty.Binop.Implies f1 f2
+let term_imp t1 t2 = Expr.raw_binop type_bool Ty.Binop.Implies t1 t2
 
 (* Affiche une formule donnée *)
-let term_print f = f |> Expr.to_string |> Format.printf "%s%!"
+let term_print t = t |> Expr.to_string |> Format.printf "%s%!"
 
 (* ===== TERM ===== *)
 
@@ -158,14 +180,13 @@ let term_div_real t1 t2 = Expr.raw_binop type_real Ty.Binop.Div t1 t2
 let ( /.@ ) = term_div_real
 
 (* Modulo entre deux termes *)
-let term_mod t1 t2 = Expr.raw_binop type_int Ty.Binop.Rem t1 t2
-(*
+let term_mod t1 t2 =
   match (Expr.ty t1, Expr.ty t2) with
   | Ty.Ty_int, Ty.Ty_int -> Expr.raw_binop type_int Ty.Binop.Rem t1 t2
   | Ty.Ty_int, Ty.Ty_real | Ty.Ty_real, Ty.Ty_int | Ty.Ty_real, Ty.Ty_real ->
     Expr.raw_binop type_real Ty.Binop.Rem t1 t2
   | _ -> assert false
-  *)
+
 
 (* If-Then-Else entre une formule et deux termes *)
 let term_ite t1 t2 t3 = Expr.triop type_bool Ty.Triop.Ite t1 t2 t3
@@ -174,13 +195,14 @@ let term_ite t1 t2 t3 = Expr.triop type_bool Ty.Triop.Ite t1 t2 t3
 let term_var v = Expr.symbol v
 
 (* Ré-interprète un reel en un entier *)
-let term_as_int t = Expr.raw_cvtop type_real Ty.Cvtop.Reinterpret_int t
+let term_as_int t =
+  t
+  |> Expr.raw_unop type_real Ty.Unop.Floor
+  |> Expr.raw_cvtop type_real Ty.Cvtop.Reinterpret_int
+
 
 (* Ré-interprète un entier en un reel *)
 let term_as_real t = Expr.raw_cvtop type_int Ty.Cvtop.Reinterpret_float t
-
-(* Floor un reel *)
-let term_floor t = Expr.raw_unop type_real Ty.Unop.Floor t
 
 (* ===== SYMBOLES ===== *)
 
@@ -207,7 +229,7 @@ let declare_symbol name ty =
 (* Declare un symbole à partir d'une variable et d'un n donné *)
 let get_symbol =
   let symbols = Hashtbl.create 16 in
-  fun (name : string) ty (n : symbol_diff) ->
+  fun (name : string) (ty : Ty.t) (n : symbol_diff) ->
     match Hashtbl.find_opt symbols (name, ty, n) with
     | Some symbol_cached -> symbol_cached
     | None ->

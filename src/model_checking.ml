@@ -9,12 +9,18 @@ let debug = false
 (* Renvoie un terme du SMT correspondant à une expression donnée
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
 *)
-let rec get_term_from_expr arr_length types n expr =
-  let get_term_from_binop = get_term_from_binop types n in
-  let get_term_from_unop = get_term_from_unop types n in
+let rec get_term_from_expr arr_length types n { texpr_desc; _ } =
   let get_term_from_expr_rec = get_term_from_expr 0 types n in
+  let get_term_from_unop unop es =
+    let t = es |> assume_1 |> get_term_from_expr_rec in
+    unop t
+  in
+  let get_term_from_binop binop es =
+    let t1, t2 = es |> List.map get_term_from_expr_rec |> assume_2 in
+    binop t1 t2
+  in
 
-  match expr.texpr_desc with
+  match texpr_desc with
   | TE_const (Cbool false) -> term_false
   | TE_const (Cbool true) -> term_true
   | TE_const (Cint d) -> term_int d
@@ -24,8 +30,8 @@ let rec get_term_from_expr arr_length types n expr =
     term_var (get_symbol name ty n)
   | TE_op (Op_add, es) -> get_term_from_binop term_add_int es
   | TE_op (Op_add_f, es) -> get_term_from_binop term_add_real es
-  | TE_op (Op_sub, [ e ]) -> term_neg_int (get_term_from_expr_rec e)
-  | TE_op (Op_sub_f, [ e ]) -> term_neg_real (get_term_from_expr_rec e)
+  | TE_op (Op_sub, [ e ]) -> get_term_from_unop term_neg_int [ e ]
+  | TE_op (Op_sub_f, [ e ]) -> get_term_from_unop term_neg_real [ e ]
   | TE_op (Op_sub, es) -> get_term_from_binop term_sub_int es
   | TE_op (Op_sub_f, es) -> get_term_from_binop term_sub_real es
   | TE_op (Op_mul, es) -> get_term_from_binop term_mul_int es
@@ -47,36 +53,16 @@ let rec get_term_from_expr arr_length types n expr =
     let t1, t2, t3 = es |> List.map get_term_from_expr_rec |> assume_3 in
     term_ite (t1 =@ term_true) t2 t3
   | TE_prim ({ name; _ }, es) when name = "int_of_real" ->
-    let t = es |> assume_1 |> get_term_from_expr_rec in
-    t |> term_floor |> term_as_int
+    get_term_from_unop term_as_int es
   | TE_prim ({ name; _ }, es) when name = "real_of_int" ->
-    let t = es |> assume_1 |> get_term_from_expr_rec in
-    t |> term_as_real
+    get_term_from_unop term_as_real es
   | TE_arrow (e1, e2) ->
     term_ite
       (diff_extract n =@ term_int arr_length)
       (get_term_from_expr_rec e1)
       (get_term_from_expr (arr_length + 1) types n e2)
   | TE_pre e -> get_term_from_expr 0 types (diff_decr n) e
-  | TE_prim _ -> assert false
-  | TE_app _ -> assert false
-  | TE_tuple _ -> assert false
-
-
-(* Renvoie une formule du SMT correspondant à une expression unop donnée
-   Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier et l'opération du SMT
-*)
-and get_term_from_unop types n unop es =
-  let t = es |> assume_1 |> get_term_from_expr 0 types n in
-  unop t
-
-
-(* Renvoie une formule du SMT correspondant à une expression binop donnée
-   Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier et l'opération du SMT
-*)
-and get_term_from_binop types n binop es =
-  let t1, t2 = es |> List.map (get_term_from_expr 0 types n) |> assume_2 in
-  binop t1 t2
+  | TE_prim _ | TE_app _ | TE_tuple _ -> assert false
 
 
 (* Obtient une definition pour le SMT à partir d'un ensemble d'équations
@@ -137,16 +123,13 @@ let get_base_case_k_inductive delta p k =
   check ();
 
   let final_p =
-    match k with
-    | 1 -> p (diff_init term_0 0)
-    | _ -> term_ands (List.init k (fun i -> p (diff_init (term_int i) 0)))
+    term_ands (List.init k (fun i -> p (diff_init (term_int i) 0)))
   in
   if debug then begin
     Format.printf "final_p =\n\t%!";
     term_print final_p;
     Format.printf "\n\n%!"
   end;
-
   entails final_p
 
 
@@ -154,17 +137,17 @@ let get_base_case_k_inductive delta p k =
 
 (* Cas inductif pour k-induction (a k fixe) *)
 let get_ind_case_k_inductive delta p k =
-  let solver = BMC_solver.create () in
+  let solver = IND_solver.create () in
   let context = ref [] in
 
   let assume f =
     context := f :: !context;
-    BMC_solver.add solver [ f ]
+    IND_solver.add solver [ f ]
   in
   let check () =
-    if BMC_solver.check solver !context <> `Sat then failwith "Unsat context"
+    if IND_solver.check solver !context <> `Sat then failwith "Unsat context"
   in
-  let entails f = BMC_solver.check solver [ term_not f ] = `Unsat in
+  let entails f = IND_solver.check solver [ term_not f ] = `Unsat in
 
   let n = term_var (declare_symbol ("n_k_" ^ string_of_int k) type_int) in
 
@@ -218,25 +201,21 @@ let get_ind_case_k_inductive delta p k =
 
 (* ===== CHECKING ===== *)
 
-let check node =
-  let k = 20 in
-  let delta, p = get_defs_from_node node in
+exception Solved
 
+let check node =
+  let delta, p = get_defs_from_node node in
   try
-    for i = 1 to k do
+    for i = 1 to max_int do
       Format.printf "Checking k-inductive for k=%d@." i;
       if not (get_base_case_k_inductive delta p i) then begin
         Format.printf "\027[31mFALSE PROPERTY at base case k=%d\027[0m@." i;
-        exit 0
+        raise Solved
       end
       else if get_ind_case_k_inductive delta p i then begin
         Format.printf "\027[32mTRUE PROPERTY at k=%d\027[0m@." i;
-        exit 0
+        raise Solved
       end
     done;
-    Format.printf "\027[34mDon't know after k=%d\027[0m@." k
-  with e ->
-    (* Affiche l'exception et la backtrace actuelle manuellement *)
-    Printexc.print_backtrace stderr;
-    Format.eprintf "Erreur capturée : %s@." (Printexc.to_string e);
-    raise e
+    Format.printf "\027[34mDon't know\027[0m@."
+  with Solved -> ()
