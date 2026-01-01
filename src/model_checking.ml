@@ -186,6 +186,43 @@ let get_symbols_from_node aux { tn_input; tn_output; tn_local; _ } :
   symbols
 
 
+(* ===== Variables d'Etat ===== *)
+
+(* Renvoie la liste des variables d'état d'un noeud *)
+
+let rec get_state_vars_from_expr seen state_vars { texpr_desc; _ } =
+  match texpr_desc with
+  | TE_const _ -> ()
+  | TE_ident _ -> ()
+  | TE_op (_, es) | TE_app (_, es) | TE_prim (_, es) ->
+    List.iter (get_state_vars_from_expr seen state_vars) es
+  | TE_arrow (e1, e2) ->
+    get_state_vars_from_expr seen state_vars e1;
+    get_state_vars_from_expr seen state_vars e2
+  | TE_pre expr -> begin
+    match expr.texpr_desc with
+    | TE_ident { name; _ } ->
+      if not (Hashtbl.mem seen name) then begin
+        Hashtbl.add seen name ();
+        state_vars := name :: !state_vars
+      end
+    | _ -> assert false (*Le noeud doit être "pre"-normalisé*)
+  end
+  | TE_tuple _ -> assert false
+
+
+let get_state_vars_from_eqs seen state_vars { teq_expr; _ } =
+  get_state_vars_from_expr seen state_vars teq_expr
+
+
+let get_state_vars_from_node { tn_equs; _ } : string list =
+  let seen = Hashtbl.create 16 in
+  let state_vars = ref [] in
+
+  List.iter (get_state_vars_from_eqs seen state_vars) tn_equs;
+  List.rev !state_vars
+
+
 (* ===== DÉFINITIONS ===== *)
 
 (* Renvoie une formule du SMT correspondant à une expression donnée
@@ -262,6 +299,7 @@ and get_formula_from_lit symbols n op es =
 
 (* Renvoie un terme du SMT correspondant à une expression donnée
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
+   On assume que le noeud est "pre"-normalisé
 *)
 and get_term_from_expr
   arr_length (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) n expr :
@@ -299,7 +337,11 @@ and get_term_from_expr
       (n =@ term_int arr_length)
       (get_term_from_expr 0 symbols n e1)
       (get_term_from_expr (arr_length + 1) symbols n e2)
-  | TE_pre e -> get_term_from_expr 0 symbols (n -@ term_1) e
+  | TE_pre e -> begin
+    match e.texpr_desc with
+    | TE_ident { name; _ } -> term_app (Hashtbl.find symbols name) (n -@ term_1)
+    | _ -> assert false (*Le noeud doit être "pre"-normalisé*)
+  end
   | TE_op _ ->
     Format.printf "Cash on this expression :@.";
     Typed_ast_printer.print_exp Format.std_formatter expr;
@@ -320,7 +362,9 @@ and get_term_from_binop symbols n op es =
 (* Obtient une definition pour le SMT à partir d'un ensemble d'équations
    Pré-condition : ne pas avoir de tuples dans les équations
 *)
-let get_def_from_eqs symbols aux eqs : Aez.Smt.Term.t -> Aez.Smt.Formula.t =
+let get_def_from_eqs state_vars symbols aux eqs :
+  (Aez.Smt.Term.t -> Aez.Smt.Formula.t) * (Aez.Smt.Term.t -> Aez.Smt.Formula.t)
+    =
   let defs =
     List.map
       begin fun { teq_patt; teq_expr } ->
@@ -344,22 +388,55 @@ let get_def_from_eqs symbols aux eqs : Aez.Smt.Term.t -> Aez.Smt.Formula.t =
       aux
   in
 
+  let init_defs =
+    if state_vars <> [] then
+      List.map
+        begin fun { teq_patt; _ } ->
+          let def_name = (List.hd teq_patt.tpatt_desc).name in
+          if List.mem def_name state_vars then fun n ->
+            let curr_symbol = Hashtbl.find symbols def_name in
+            term_app curr_symbol n =@ term_app curr_symbol term_0
+          else fun _ -> Formula.f_true
+        end
+        eqs
+    else [ (fun _ -> Formula.f_true) ]
+  in
+
   let final_defs = defs @ defs_aux in
 
-  fun n -> Formula.make Formula.And (List.map (fun def -> def n) final_defs)
+  let delta =
+   fun n -> Formula.make Formula.And (List.map (fun def -> def n) final_defs)
+  in
+
+  let init =
+   fun n -> Formula.make Formula.And (List.map (fun def -> def n) init_defs)
+  in
+
+  (delta, init)
 
 
-(* Obtient la définition delta et p d'un noeud donné
+let get_symbol_from_var_names
+  (symbols : (string, Aez.Smt.Symbol.t) Hashtbl.t) var_names :
+  Aez.Smt.Symbol.t list =
+  List.map (fun name -> Hashtbl.find symbols name) var_names
+
+
+(* Obtient la définition delta p d'un noeud donné
+   ainsi que les equations de l'initialisation pour la "path compression",
+   en effet on cherche a contraindre les chemins d'états a ne pas contenir d'etat initiaux
    La définition delta correspond à la conjonction des définitions des équations du noeud
    La définition p assure qu'on veut que la propriété OK soit vraie
 *)
-let get_defs_from_node aux ({ tn_equs; _ } as node) :
-  (Aez.Smt.Term.t -> Aez.Smt.Formula.t) * (Aez.Smt.Term.t -> Aez.Smt.Formula.t)
-    =
+let get_defs_from_node state_vars aux ({ tn_equs; _ } as node) :
+  (Aez.Smt.Term.t -> Aez.Smt.Formula.t)
+  * (Aez.Smt.Term.t -> Aez.Smt.Formula.t)
+  * (Aez.Smt.Term.t -> Aez.Smt.Formula.t)
+  * Aez.Smt.Symbol.t list =
   let symbols = get_symbols_from_node aux node in
-  let delta_def = get_def_from_eqs symbols aux tn_equs in
+  let _state_symbols = get_symbol_from_var_names symbols state_vars in
+  let delta_def, init = get_def_from_eqs state_vars symbols aux tn_equs in
   let p_def n = term_app (Hashtbl.find symbols "OK") n =@ Term.t_true in
-  (delta_def, p_def)
+  (delta_def, p_def, init, _state_symbols)
 
 
 (* ===== PRÉ-PROCESS ===== *)
@@ -408,6 +485,42 @@ let preprocess_node ({ tn_equs; _ } as node) =
   (List.flatten aux, { node with tn_equs })
 
 
+(* ===== COMPRESSION DE CHEMINS ===== *)
+
+let term_diff_state state_symbols i j =
+  match state_symbols with
+  | [] -> assert false
+  | [ symbol ] ->
+    let ti = term_app symbol i in
+    let tj = term_app symbol j in
+    formula_not (ti =@ tj)
+  | _ ->
+    let diffs =
+      List.map
+        begin fun symbol ->
+          let ti = term_app symbol i in
+          let tj = term_app symbol j in
+          formula_not (ti =@ tj)
+        end
+        state_symbols
+    in
+    Formula.make Formula.Or diffs
+
+
+let cnk n delta k state_symbols init =
+  let formula = ref Formula.f_true in
+  for i = 0 to k do
+    for j = i + 1 to k do
+      let diff_ij =
+        term_diff_state state_symbols (n +@ term_int i) (n +@ term_int j)
+      in
+      let not_init_j = formula_not (init (n +@ term_int j)) in
+      formula := !formula &&@ diff_ij &&@ not_init_j
+    done
+  done;
+  !formula &&@ delta term_0
+
+
 (* ===== CAS DE BASE ===== *)
 
 (* Notre solveur pour le cas de base *)
@@ -443,7 +556,7 @@ let get_base_case_k_inductive delta p k =
   let entails = BMC_solver.entails ~id:k in
   let check = BMC_solver.check in
 
-  for i = 0 to k - 1 do
+  for i = 0 to k do
     let delta_i = delta (term_int i) in
     assume delta_i
   done;
@@ -452,7 +565,7 @@ let get_base_case_k_inductive delta p k =
   let final_p =
     match k with
     | 1 -> p term_0
-    | _ -> Formula.make Formula.And (List.init k (fun i -> p (term_int i)))
+    | _ -> Formula.make Formula.And (List.init (k + 1) (fun i -> p (term_int i)))
   in
 
   entails final_p
@@ -483,7 +596,7 @@ let get_ind_case delta p =
 
 (* Cas inductif pour k-induction (a k fixe)*)
 
-let get_ind_case_k_inductive delta p k =
+let get_ind_case_k_inductive delta init _state_symbols p k =
   let assume = IND_solver.assume ~id:k in
   let entails = IND_solver.entails ~id:k in
   let check = IND_solver.check in
@@ -498,16 +611,42 @@ let get_ind_case_k_inductive delta p k =
   assume (delta n);
   assume (p n);
 
-  for i = 1 to k do
+  for i = 1 to k + 1 do
     let delta_k = delta (n +@ term_int i) in
     assume delta_k
   done;
 
-  for i = 1 to k - 1 do
+  for i = 1 to k do
     assume (p (n +@ term_int i))
   done;
+
+  if _state_symbols <> [] then begin
+    let cnk_formula = cnk n delta k _state_symbols init in
+    (* Formula.print Format.std_formatter cnk_formula;
+    Format.printf "\n%!"; *)
+    assume cnk_formula
+  end;
+
+  Format.printf "Checking entailment for k=%d@." k;
   check ();
-  entails (p (n +@ term_int k))
+  entails (p (n +@ term_int (k + 1)))
+
+
+let check_no_loop_path state_symbols init delta k =
+  let assume = IND_solver.assume ~id:(1000 + k) in
+  let entails = IND_solver.entails ~id:(1000 + k) in
+  let check = IND_solver.check in
+
+  for i = 0 to k + 1 do
+    let delta_i = delta (term_int i) in
+    assume delta_i
+  done;
+  check ();
+
+  let no_loop_formula =
+    formula_not (cnk term_1 delta (k + 1) state_symbols init)
+  in
+  entails no_loop_formula
 
 
 (* ===== CHECKING ===== *)
@@ -525,20 +664,48 @@ let check node =
   else Format.printf "\027[34mDon't know\027[0m@."
 *)
 
-let check node =
-  let k = 20 in
-  let aux, node = preprocess_node node in
-  let delta, p = get_defs_from_node aux node in
+let k_loop_compr delta init p k _state_symbols =
+  (*assume que _state_symbols est non vide*)
+  for i = 1 to k do
+    Format.printf "Checking k-inductive with loop compression for k=%d@." i;
+    if not (get_base_case_k_inductive delta p i) then begin
+      Format.printf "\027[31mFALSE PROPERTY at base case k=%d\027[0m@." i;
+      exit 0
+    end
+    else if get_ind_case_k_inductive delta init _state_symbols p i then begin
+      Format.printf "\027[32mTRUE PROPERTY at k=%d\027[0m@." i;
+      exit 0
+    end
+    else if check_no_loop_path _state_symbols init delta i then begin
+      Format.printf
+        "\027[33m TRUE PROPERTY (by loop compression) at k=%d\027[0m@." i;
+      exit 0
+    end
+  done;
+  Format.printf "\027[34mDon't know after k=%d\027[0m@." k
 
+
+let k_loop delta init p k =
   for i = 1 to k do
     Format.printf "Checking k-inductive for k=%d@." i;
     if not (get_base_case_k_inductive delta p i) then begin
       Format.printf "\027[31mFALSE PROPERTY at base case k=%d\027[0m@." i;
       exit 0
     end
-    else if get_ind_case_k_inductive delta p i then begin
+    else if get_ind_case_k_inductive delta init [] p i then begin
       Format.printf "\027[32mTRUE PROPERTY at k=%d\027[0m@." i;
       exit 0
     end
   done;
   Format.printf "\027[34mDon't know after k=%d\027[0m@." k
+
+
+let check node =
+  let k = 20 in
+  let state_vars = get_state_vars_from_node node in
+  List.iter (fun v -> Format.printf "State var: %s@." v) state_vars;
+  let aux, node = preprocess_node node in
+  let delta, p, init, _state_symbols = get_defs_from_node state_vars aux node in
+
+  if _state_symbols <> [] then k_loop_compr delta init p k _state_symbols
+  else k_loop delta init p k
