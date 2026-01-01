@@ -6,71 +6,12 @@ let debug = false
 
 (* ===== DÉFINITIONS ===== *)
 
-(* Renvoie une formule du SMT correspondant à une expression donnée
-   Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
-*)
-let rec get_formula_from_expr types n expr =
-  let get_formula_from_lit = get_formula_from_lit types n in
-  let get_formula_from_unop = get_formula_from_unop types n in
-  let get_formula_from_binop = get_formula_from_binop types n in
-
-  match expr.texpr_desc with
-  | TE_op (Op_eq, es) -> get_formula_from_lit formula_eq es
-  | TE_op (Op_neq, es) -> get_formula_from_lit formula_neq es
-  | TE_op (Op_lt, es) -> get_formula_from_lit formula_lt es
-  | TE_op (Op_le, es) -> get_formula_from_lit formula_le es
-  | TE_op (Op_gt, es) -> get_formula_from_lit formula_gt es
-  | TE_op (Op_ge, es) -> get_formula_from_lit formula_ge es
-  | TE_op (Op_not, es) -> get_formula_from_unop formula_not es
-  | TE_op (Op_and, es) -> get_formula_from_binop formula_and es
-  | TE_op (Op_or, es) -> get_formula_from_binop formula_or es
-  | TE_op (Op_impl, es) -> get_formula_from_binop formula_imp es
-  | _ ->
-    Format.printf "Cash on this expression :@.";
-    Typed_ast_printer.print_exp Format.std_formatter expr;
-    Format.printf "\n%!";
-    failwith "We can't make a FORMULA form this expression\n%!"
-
-
-(* Renvoie un formule du SMT correspondant à une expression transformée donnée
-   Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
-*)
-and get_formula_from_expr_transformer types n e =
-  if require_formula e then get_formula_from_expr types n e
-  else get_term_from_expr 0 types n e =@ term_true
-
-
-(* Renvoie une formule du SMT correspondant à une expression unop donnée
-   Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
-*)
-and get_formula_from_unop types n unop es =
-  let f = es |> assume_1 |> get_formula_from_expr_transformer types n in
-  unop f
-
-
-(* Renvoie une formule du SMT correspondant à une expression binop donnée
-   Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
-*)
-and get_formula_from_binop types n binop es =
-  let f1, f2 =
-    es |> List.map (get_formula_from_expr_transformer types n) |> assume_2
-  in
-  binop f1 f2
-
-
-(* Renvoie une formule du SMT correspondant à une expression littérale donnée
-   Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
-*)
-and get_formula_from_lit types n op es =
-  let e1, e2 = es |> List.map (get_term_from_expr 0 types n) |> assume_2 in
-  op e1 e2
-
-
 (* Renvoie un terme du SMT correspondant à une expression donnée
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
 *)
-and get_term_from_expr arr_length types n expr =
+let rec get_term_from_expr arr_length types n expr =
   let get_term_from_binop = get_term_from_binop types n in
+  let get_term_from_unop = get_term_from_unop types n in
   let get_term_from_expr_rec = get_term_from_expr 0 types n in
 
   match expr.texpr_desc with
@@ -83,8 +24,8 @@ and get_term_from_expr arr_length types n expr =
     term_var (get_symbol name ty n)
   | TE_op (Op_add, es) -> get_term_from_binop term_add_int es
   | TE_op (Op_add_f, es) -> get_term_from_binop term_add_real es
-  | TE_op (Op_sub, [ e ]) -> term_0 -@ get_term_from_expr_rec e
-  | TE_op (Op_sub_f, [ e ]) -> term_0f -@ get_term_from_expr_rec e
+  | TE_op (Op_sub, [ e ]) -> term_neg_int (get_term_from_expr_rec e)
+  | TE_op (Op_sub_f, [ e ]) -> term_neg_real (get_term_from_expr_rec e)
   | TE_op (Op_sub, es) -> get_term_from_binop term_sub_int es
   | TE_op (Op_sub_f, es) -> get_term_from_binop term_sub_real es
   | TE_op (Op_mul, es) -> get_term_from_binop term_mul_int es
@@ -92,6 +33,16 @@ and get_term_from_expr arr_length types n expr =
   | TE_op (Op_div, es) -> get_term_from_binop term_div_int es
   | TE_op (Op_div_f, es) -> get_term_from_binop term_div_real es
   | TE_op (Op_mod, es) -> get_term_from_binop term_mod es
+  | TE_op (Op_eq, es) -> get_term_from_binop term_eq es
+  | TE_op (Op_neq, es) -> get_term_from_binop term_neq es
+  | TE_op (Op_lt, es) -> get_term_from_binop term_lt es
+  | TE_op (Op_le, es) -> get_term_from_binop term_le es
+  | TE_op (Op_gt, es) -> get_term_from_binop term_gt es
+  | TE_op (Op_ge, es) -> get_term_from_binop term_ge es
+  | TE_op (Op_not, es) -> get_term_from_unop term_not es
+  | TE_op (Op_and, es) -> get_term_from_binop term_and es
+  | TE_op (Op_or, es) -> get_term_from_binop term_or es
+  | TE_op (Op_impl, es) -> get_term_from_binop term_imp es
   | TE_op (Op_if, es) ->
     let t1, t2, t3 = es |> List.map get_term_from_expr_rec |> assume_3 in
     term_ite (t1 =@ term_true) t2 t3
@@ -110,11 +61,14 @@ and get_term_from_expr arr_length types n expr =
   | TE_prim _ -> assert false
   | TE_app _ -> assert false
   | TE_tuple _ -> assert false
-  | TE_op _ ->
-    Format.printf "Cash on this expression :@.";
-    Typed_ast_printer.print_exp Format.std_formatter expr;
-    Format.printf "\n%!";
-    failwith "We can't make a TERM form this expression\n%!"
+
+
+(* Renvoie une formule du SMT correspondant à une expression unop donnée
+   Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier et l'opération du SMT
+*)
+and get_term_from_unop types n unop es =
+  let t = es |> assume_1 |> get_term_from_expr 0 types n in
+  unop t
 
 
 (* Renvoie une formule du SMT correspondant à une expression binop donnée
@@ -128,7 +82,7 @@ and get_term_from_binop types n binop es =
 (* Obtient une definition pour le SMT à partir d'un ensemble d'équations
    Pré-condition : ne pas avoir de tuples dans les équations
 *)
-let get_def_from_eqs types aux eqs =
+let get_def_from_eqs types eqs =
   let defs =
     List.map
       begin fun { teq_patt; teq_expr } ->
@@ -140,80 +94,19 @@ let get_def_from_eqs types aux eqs =
       end
       eqs
   in
-
-  let defs_aux =
-    List.map
-      begin fun (name, ty, expr) ->
-        fun n ->
-         let aux_def = term_var (get_symbol name ty n) =@ term_true in
-         let expr_def = get_formula_from_expr types n expr in
-
-         formula_imp aux_def expr_def &&@ formula_imp expr_def aux_def
-      end
-      aux
-  in
-
-  let final_defs = defs @ defs_aux in
-
-  fun n -> formula_ands (List.map (fun def -> def n) final_defs)
+  fun n -> term_ands (List.map (fun def -> def n) defs)
 
 
 (* Obtient la définition delta et p d'un noeud donné
    La définition delta correspond à la conjonction des définitions des équations du noeud
    La définition p assure qu'on veut que la propriété OK soit vraie
 *)
-let get_defs_from_node aux ({ tn_equs; _ } as node) =
-  let types = get_types_from_node aux node in
-  let delta_def = get_def_from_eqs types aux tn_equs in
+let get_defs_from_node ({ tn_equs; _ } as node) =
+  let types = get_types_from_node node in
+  let delta_def = get_def_from_eqs types tn_equs in
   let p_typ = Hashtbl.find types "OK" in
   let p_def n = term_var (get_symbol "OK" p_typ n) =@ term_true in
   (delta_def, p_def)
-
-
-(* ===== PRÉ-PROCESS ===== *)
-
-(* Preprocess une expression pour créer les expressions auxiliaires *)
-let rec preprocess_expr ({ texpr_desc; _ } as expr) =
-  let aux, texpr_desc =
-    match texpr_desc with
-    | TE_op (op, es) when require_formula expr ->
-      let aux, es = es |> List.map preprocess_expr |> List.split in
-      let expr = { expr with texpr_desc = TE_op (op, es) } in
-      let aux_name = fresh_name ~name:"aux" () in
-      let aux_type = type_bool in
-      let aux_tuple = (aux_name, aux_type, expr) in
-      let id = Ident.make aux_name Stream in
-      (List.flatten ([ aux_tuple ] :: aux), TE_ident id)
-    | TE_const _ | TE_ident _ -> ([], texpr_desc)
-    | TE_op (op, es) ->
-      let aux, es = es |> List.map preprocess_expr |> List.split in
-      (List.flatten aux, TE_op (op, es))
-    | TE_prim (id, es) ->
-      let aux, es = es |> List.map preprocess_expr |> List.split in
-      (List.flatten aux, TE_prim (id, es))
-    | TE_arrow (e1, e2) ->
-      let aux1, e1 = preprocess_expr e1 in
-      let aux2, e2 = preprocess_expr e2 in
-      (aux1 @ aux2, TE_arrow (e1, e2))
-    | TE_pre e ->
-      let aux, e = preprocess_expr e in
-      (aux, TE_pre e)
-    | TE_app _ -> assert false
-    | TE_tuple _ -> assert false
-  in
-  (aux, { expr with texpr_desc })
-
-
-(* Preprocess une équantion pour créer les expressions auxiliaires *)
-let preprocess_equ ({ teq_expr; _ } as equ) =
-  let aux, teq_expr = preprocess_expr teq_expr in
-  (aux, { equ with teq_expr })
-
-
-(* Preprocess un node pour créer les expressions auxiliaires *)
-let preprocess_node ({ tn_equs; _ } as node) =
-  let aux, tn_equs = tn_equs |> List.map preprocess_equ |> List.split in
-  (List.flatten aux, { node with tn_equs })
 
 
 (* ===== CAS DE BASE ===== *)
@@ -230,13 +123,13 @@ let get_base_case_k_inductive delta p k =
   let check () =
     if BMC_solver.check solver !context <> `Sat then failwith "Unsat context"
   in
-  let entails f = BMC_solver.check solver [ formula_not f ] = `Unsat in
+  let entails f = BMC_solver.check solver [ term_not f ] = `Unsat in
 
   for i = 0 to k - 1 do
     let delta_i = delta (diff_init (term_int i) 0) in
     if debug then begin
       Format.printf "delta_%d =\n\t%!" i;
-      formula_print delta_i;
+      term_print delta_i;
       Format.printf "\n\n%!"
     end;
     assume delta_i
@@ -246,11 +139,11 @@ let get_base_case_k_inductive delta p k =
   let final_p =
     match k with
     | 1 -> p (diff_init term_0 0)
-    | _ -> formula_ands (List.init k (fun i -> p (diff_init (term_int i) 0)))
+    | _ -> term_ands (List.init k (fun i -> p (diff_init (term_int i) 0)))
   in
   if debug then begin
     Format.printf "final_p =\n\t%!";
-    formula_print final_p;
+    term_print final_p;
     Format.printf "\n\n%!"
   end;
 
@@ -271,7 +164,7 @@ let get_ind_case_k_inductive delta p k =
   let check () =
     if BMC_solver.check solver !context <> `Sat then failwith "Unsat context"
   in
-  let entails f = BMC_solver.check solver [ formula_not f ] = `Unsat in
+  let entails f = BMC_solver.check solver [ term_not f ] = `Unsat in
 
   let n = term_var (declare_symbol ("n_k_" ^ string_of_int k) type_int) in
 
@@ -280,13 +173,13 @@ let get_ind_case_k_inductive delta p k =
   let p_n = p (diff_init n 0) in
   if debug then begin
     Format.printf "cond =\n\t%!";
-    formula_print cond;
+    term_print cond;
     Format.printf "\n\n%!";
     Format.printf "delta_n =\n\t%!";
-    formula_print delta_n;
+    term_print delta_n;
     Format.printf "\n\n%!";
     Format.printf "p_n =\n\t%!";
-    formula_print p_n;
+    term_print p_n;
     Format.printf "\n\n%!"
   end;
   assume cond;
@@ -297,7 +190,7 @@ let get_ind_case_k_inductive delta p k =
     let delta_k = delta (diff_init n i) in
     if debug then begin
       Format.printf "delta_n+%d =\n\t%!" i;
-      formula_print delta_k;
+      term_print delta_k;
       Format.printf "\n\n%!"
     end;
     assume delta_k
@@ -307,7 +200,7 @@ let get_ind_case_k_inductive delta p k =
     let p_i = p (diff_init n i) in
     if debug then begin
       Format.printf "p_n+%d =\n\t%!" i;
-      formula_print p_i;
+      term_print p_i;
       Format.printf "\n\n%!"
     end;
     assume p_i
@@ -317,7 +210,7 @@ let get_ind_case_k_inductive delta p k =
   let p_k = p (diff_init n k) in
   if debug then begin
     Format.printf "p_n+%d =\n\t%!" k;
-    formula_print p_k;
+    term_print p_k;
     Format.printf "\n\n%!"
   end;
   entails p_k
@@ -327,8 +220,7 @@ let get_ind_case_k_inductive delta p k =
 
 let check node =
   let k = 20 in
-  let aux, node = preprocess_node node in
-  let delta, p = get_defs_from_node aux node in
+  let delta, p = get_defs_from_node node in
 
   for i = 1 to k do
     Format.printf "Checking k-inductive for k=%d@." i;
