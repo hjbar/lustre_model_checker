@@ -1,3 +1,13 @@
+(*
+
+  Pré-conditions générale :
+    - Avoir un seul noeud
+    - Ne pas avoir de tuples
+
+  Toujours appeler inline avant de se servir de ce module
+
+*)
+
 open Utils
 open Model_checking_utils
 open Typed_ast
@@ -6,8 +16,13 @@ let debug = false
 
 (* ===== DÉFINITIONS ===== *)
 
-(* Renvoie un terme du SMT correspondant à une expression donnée
-   Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
+(*
+  Renvoie un terme du SMT correspondant à une expression donnée
+  Prend en argument :
+    - la longueur de la flèche en cours : arr_length
+    - l'ensemble des types : types
+    - un symbol_diff : n
+    - une expression : { texpr_desc; _ }
 *)
 let rec get_term_from_expr arr_length types n { texpr_desc; _ } =
   let get_term_from_expr_rec = get_term_from_expr 0 types n in
@@ -65,9 +80,7 @@ let rec get_term_from_expr arr_length types n { texpr_desc; _ } =
   | TE_prim _ | TE_app _ | TE_tuple _ -> assert false
 
 
-(* Obtient une definition pour le SMT à partir d'un ensemble d'équations
-   Pré-condition : ne pas avoir de tuples dans les équations
-*)
+(* Obtient une definition pour le SMT à partir d'un ensemble d'équations *)
 let get_def_from_eqs types eqs =
   let defs =
     List.map
@@ -97,7 +110,7 @@ let get_defs_from_node ({ tn_equs; _ } as node) =
 
 (* ===== CAS DE BASE ===== *)
 
-(* Solveur cas de base k-inductif (a k fixe) *)
+(* Solveur cas de base k-inductif (k fixé) *)
 let get_base_case_k_inductive delta p k =
   let solver = BMC_solver.create () in
   let context = ref [] in
@@ -135,7 +148,7 @@ let get_base_case_k_inductive delta p k =
 
 (* ===== CAS INDUCTIF ===== *)
 
-(* Cas inductif pour k-induction (a k fixe) *)
+(* Cas inductif pour k-induction (k fixé) *)
 let get_ind_case_k_inductive delta p k =
   let solver = IND_solver.create () in
   let context = ref [] in
@@ -201,8 +214,10 @@ let get_ind_case_k_inductive delta p k =
 
 (* ===== CHECKING ===== *)
 
+(* Pour stopper la recherche d'une solution k-inductive *)
 exception Solved
 
+(* Effectue la k-induction *)
 let check node =
   let delta, p = get_defs_from_node node in
   try

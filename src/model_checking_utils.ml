@@ -21,7 +21,7 @@ let asttype_to_smttype = function
   | Asttypes.Treal -> type_real
 
 
-(* Renvoie les types associés aux variables *)
+(* Renvoie les types associés aux variables d'un noeud *)
 let get_types_from_node { tn_input; tn_output; tn_local; _ } =
   let types = Hashtbl.create 16 in
   let get_type (id, ty) =
@@ -35,19 +35,19 @@ let get_types_from_node { tn_input; tn_output; tn_local; _ } =
   types
 
 
-(* Renvoie le type d'un term *)
+(* Renvoie le type d'un terme *)
 let get_type t = Expr.ty t
 
-(* Check la compatibilité des types et le renvoie *)
+(* Check la compatibilité des types *)
 let check_type t1 t2 =
   let ty1 = get_type t1 in
   if ty1 <> get_type t2 then failwith "Incompatible types";
   ty1
 
 
-(* ===== FORMULA ===== *)
+(* ===== TERM ===== *)
 
-(* Négation d'une formule *)
+(* Négation logique d'une terme *)
 let term_not t = Expr.raw_unop type_bool Ty.Unop.Not t
 
 (* Égalité entre deux termes *)
@@ -92,7 +92,7 @@ let term_ge t1 t2 =
 
 let ( >=@ ) = term_ge
 
-(* Conjonction entre deux formules *)
+(* Conjonction entre termes *)
 let term_and t1 t2 = Expr.raw_binop type_bool Ty.Binop.And t1 t2
 
 let ( &&@ ) = term_and
@@ -104,18 +104,13 @@ let rec term_ands = function
   | t :: ts -> t &&@ term_ands ts
 
 
-(* Disjonction entre deux formules *)
+(* Disjonction entre deux termes *)
 let term_or t1 t2 = Expr.raw_binop type_bool Ty.Binop.Or t1 t2
 
 let ( ||@ ) = term_or
 
-(* Implication entre deux formules *)
+(* Implication entre deux termes *)
 let term_imp t1 t2 = Expr.raw_binop type_bool Ty.Binop.Implies t1 t2
-
-(* Affiche une formule donnée *)
-let term_print t = t |> Expr.to_string |> Format.printf "%s%!"
-
-(* ===== TERM ===== *)
 
 (* Constante True *)
 let term_true = Expr.value Value.True
@@ -123,20 +118,33 @@ let term_true = Expr.value Value.True
 (* Constante False *)
 let term_false = Expr.value Value.False
 
-(* Constante Term 0 *)
+(* Constant Term 0 *)
 let term_0 = Expr.value (Value.Int 0)
 
-(* Constante Term 0. *)
+(* Constant Term 0. *)
 let term_0f = Expr.value (Value.Real 0.)
 
-(* Constante Term 1 *)
+(* Constant Term 1 *)
 let term_1 = Expr.value (Value.Int 1)
 
 (* Créer le terme Term d *)
 let term_int d = Expr.value (Value.Int d)
 
-(* Créer le terme Term f *)
-let term_real f = Expr.value (Value.Real f)
+(* Créer le terme Term r *)
+let term_real r = Expr.value (Value.Real r)
+
+(* Ré-interprète un reel en un entier *)
+let term_as_int t =
+  t
+  |> Expr.raw_unop type_real Ty.Unop.Floor
+  |> Expr.raw_cvtop type_real Ty.Cvtop.Reinterpret_int
+
+
+(* Ré-interprète un entier en un reel *)
+let term_as_real t = Expr.raw_cvtop type_int Ty.Cvtop.Reinterpret_float t
+
+(* Variable v *)
+let term_var v = Expr.symbol v
 
 (* Addition entre deux termes *)
 let term_add_int t1 t2 = Expr.raw_binop type_int Ty.Binop.Add t1 t2
@@ -188,25 +196,15 @@ let term_mod t1 t2 =
   | _ -> assert false
 
 
-(* If-Then-Else entre une formule et deux termes *)
+(* If-Then-Else avoir trois termes *)
 let term_ite t1 t2 t3 = Expr.triop type_bool Ty.Triop.Ite t1 t2 t3
 
-(* Variable v *)
-let term_var v = Expr.symbol v
-
-(* Ré-interprète un reel en un entier *)
-let term_as_int t =
-  t
-  |> Expr.raw_unop type_real Ty.Unop.Floor
-  |> Expr.raw_cvtop type_real Ty.Cvtop.Reinterpret_int
-
-
-(* Ré-interprète un entier en un reel *)
-let term_as_real t = Expr.raw_cvtop type_int Ty.Cvtop.Reinterpret_float t
+(* Affiche une terme donné *)
+let term_print t = t |> Expr.to_string |> Format.printf "%s%!"
 
 (* ===== SYMBOLES ===== *)
 
-(* Type pour l'unicité des n + d
+(* Type pour l'unicité des symboles représentant n + d
    Pour exprimer que n + 2 == n + 3 - 1 par exemple
 *)
 type symbol_diff = Expr.t * int
@@ -220,13 +218,13 @@ let diff_decr (n, d) = (n, d - 1)
 (* Extrait la valeur SMT correspondant au symbol_diff(n, d), i.e. n + d *)
 let diff_extract (n, d) = n +@ term_int d
 
-(* Declare un symbole avec son num, son type d'entré et son type de retour *)
+(* Declare un symbole avec son nom et son type *)
 let declare_symbol name ty =
   let name = fresh_name ~name () in
   Symbol.make ty name
 
 
-(* Declare un symbole à partir d'une variable et d'un n donné *)
+(* Declare un symbole à partir d'un nom, d'un type et d'un symbol_diff donné *)
 let get_symbol =
   let symbols = Hashtbl.create 16 in
   fun (name : string) (ty : Ty.t) (n : symbol_diff) ->
