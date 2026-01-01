@@ -202,7 +202,7 @@ let get_symbol_from_var ({ name; _ }, ty) =
   declare_symbol name [ type_int ] (asttype_to_smttype ty)
 
 
-(* Declare un stmbole frais *)
+(* Declare un symbole frais *)
 let get_fresh_symbol =
  fun ty () ->
   let name = fresh_name ~name:"aux" () in
@@ -233,3 +233,6 @@ module BMC_solver = Smt.Make (struct end)
 
 (* Notre solveur pour le cas inductif *)
 module IND_solver = Smt.Make (struct end)
+
+(* Notre solveur pour le cas no loop path *)
+module NLP_solver = Smt.Make (struct end)

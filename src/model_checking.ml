@@ -1,3 +1,14 @@
+(*
+
+  Pré-conditions générale :
+    - Avoir un seul noeud
+    - Ne pas avoir de tuples
+    - Avoir "pré-normalisé" le noeud
+
+  Toujours appeler inline avant de se servir de ce module
+
+*)
+
 open Utils
 open Model_checking_utils
 open Typed_ast
@@ -23,7 +34,7 @@ let rec get_state_vars_from_expr seen state_vars { texpr_desc; _ } =
         Hashtbl.add seen name ();
         state_vars := name :: !state_vars
       end
-    | _ -> assert false (* Le noeud doit être "pre"-normalisé *)
+    | _ -> assert false (* Le noeud doit être "pre-normalisé" *)
   end
   | TE_tuple _ -> assert false
 
@@ -37,7 +48,6 @@ let get_state_vars_from_eqs seen state_vars { teq_expr; _ } =
 let get_state_vars_from_node { tn_equs; _ } =
   let seen = Hashtbl.create 16 in
   let state_vars = ref [] in
-
   List.iter (get_state_vars_from_eqs seen state_vars) tn_equs;
   List.rev !state_vars
 
@@ -47,23 +57,35 @@ let get_state_vars_from_node { tn_equs; _ } =
 (* Renvoie une formule du SMT correspondant à une expression donnée
    Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
 *)
-let rec get_formula_from_expr symbols n expr =
-  match expr.texpr_desc with
-  | TE_op (Op_eq, es) -> get_formula_from_lit symbols n formula_eq es
-  | TE_op (Op_neq, es) -> get_formula_from_lit symbols n formula_neq es
-  | TE_op (Op_lt, es) -> get_formula_from_lit symbols n formula_lt es
-  | TE_op (Op_le, es) -> get_formula_from_lit symbols n formula_le es
-  | TE_op (Op_gt, es) -> get_formula_from_lit symbols n formula_gt es
-  | TE_op (Op_ge, es) -> get_formula_from_lit symbols n formula_ge es
-  | TE_op (Op_not, es) -> get_formula_from_unop symbols n formula_not es
-  | TE_op (Op_and, es) -> get_formula_from_binop symbols n formula_and es
-  | TE_op (Op_or, es) -> get_formula_from_binop symbols n formula_or es
-  | TE_op (Op_impl, es) -> get_formula_from_binop symbols n formula_imp es
+let rec get_formula_from_expr symbols n ({ texpr_desc; _ } as expr) =
+  let get_formula_from_lit = get_formula_from_lit symbols n in
+  let get_formula_from_unop = get_formula_from_unop symbols n in
+  let get_formula_from_binop = get_formula_from_binop symbols n in
+
+  match texpr_desc with
+  | TE_op (Op_eq, es) -> get_formula_from_lit formula_eq es
+  | TE_op (Op_neq, es) -> get_formula_from_lit formula_neq es
+  | TE_op (Op_lt, es) -> get_formula_from_lit formula_lt es
+  | TE_op (Op_le, es) -> get_formula_from_lit formula_le es
+  | TE_op (Op_gt, es) -> get_formula_from_lit formula_gt es
+  | TE_op (Op_ge, es) -> get_formula_from_lit formula_ge es
+  | TE_op (Op_not, es) -> get_formula_from_unop formula_not es
+  | TE_op (Op_and, es) -> get_formula_from_binop formula_and es
+  | TE_op (Op_or, es) -> get_formula_from_binop formula_or es
+  | TE_op (Op_impl, es) -> get_formula_from_binop formula_imp es
   | _ ->
     Format.printf "Clash on this expression :@.";
     Typed_ast_printer.print_exp Format.std_formatter expr;
     Format.printf "\n%!";
     failwith "We can't make a FORMULA form this expression\n%!"
+
+
+(* Renvoie une formule du SMT correspondant à une expression littérale donnée
+   Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
+*)
+and get_formula_from_lit symbols n op es =
+  let e1, e2 = es |> List.map (get_term_from_expr 0 symbols n) |> assume_2 in
+  op e1 e2
 
 
 (* Renvoie un formule du SMT correspondant à une expression transformée donnée
@@ -92,56 +114,45 @@ and get_formula_from_binop symbols n binop es =
   binop f1 f2
 
 
-(* Renvoie une formule du SMT correspondant à une expression littérale donnée
-   Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
-*)
-and get_formula_from_lit symbols n op es =
-  let e1, e2 = es |> List.map (get_term_from_expr 0 symbols n) |> assume_2 in
-  op e1 e2
-
-
 (* Renvoie un terme du SMT correspondant à une expression donnée
-   Prend en argument l'ensemble des symboles ainsi qu'un terme SMT n entier
-   On assume que le noeud est "pre"-normalisé
+   Prend en argument la longueur de la flèche en coours,
+   l'ensemble des symboles ainsi qu'un terme SMT n entier
 *)
-and get_term_from_expr arr_length symbols n expr =
-  match expr.texpr_desc with
+and get_term_from_expr arr_length symbols n ({ texpr_desc; _ } as expr) =
+  let get_term_from_expr_rec = get_term_from_expr 0 symbols n in
+  let get_term_from_binop = get_term_from_binop symbols n in
+
+  match texpr_desc with
   | TE_const (Cbool false) -> term_false
   | TE_const (Cbool true) -> term_true
   | TE_const (Cint d) -> term_int d
   | TE_const (Creal r) -> term_real r
   | TE_ident { name; _ } -> term_app (Hashtbl.find symbols name) n
-  | TE_op ((Op_add | Op_add_f), es) -> get_term_from_binop symbols n term_add es
-  | TE_op (Op_sub, [ e ]) -> term_0 -@ get_term_from_expr 0 symbols n e
-  | TE_op (Op_sub_f, [ e ]) -> term_0f -@ get_term_from_expr 0 symbols n e
-  | TE_op ((Op_sub | Op_sub_f), es) -> get_term_from_binop symbols n term_sub es
-  | TE_op ((Op_mul | Op_mul_f), es) -> get_term_from_binop symbols n term_mul es
-  | TE_op ((Op_div | Op_div_f), es) -> get_term_from_binop symbols n term_div es
-  | TE_op (Op_mod, es) -> get_term_from_binop symbols n term_mod es
+  | TE_op ((Op_add | Op_add_f), es) -> get_term_from_binop term_add es
+  | TE_op (Op_sub, [ e ]) -> term_0 -@ get_term_from_expr_rec e
+  | TE_op (Op_sub_f, [ e ]) -> term_0f -@ get_term_from_expr_rec e
+  | TE_op ((Op_sub | Op_sub_f), es) -> get_term_from_binop term_sub es
+  | TE_op ((Op_mul | Op_mul_f), es) -> get_term_from_binop term_mul es
+  | TE_op ((Op_div | Op_div_f), es) -> get_term_from_binop term_div es
+  | TE_op (Op_mod, es) -> get_term_from_binop term_mod es
   | TE_op (Op_if, es) ->
-    let t1, t2, t3 =
-      es |> List.map (get_term_from_expr 0 symbols n) |> assume_3
-    in
+    let t1, t2, t3 = es |> List.map get_term_from_expr_rec |> assume_3 in
     term_ite (t1 =@ term_true) t2 t3
-  | TE_prim ({ name; _ }, es) when name = "int_of_real" ->
-    ignore es;
+  | TE_prim ({ name; _ }, _es) when name = "int_of_real" ->
     failwith "TODO-int_of_real"
-  | TE_prim ({ name; _ }, es) when name = "real_of_int" ->
-    ignore es;
+  | TE_prim ({ name; _ }, _es) when name = "real_of_int" ->
     failwith "TODO-real_of_int"
   | TE_arrow (e1, e2) ->
     term_ite
       (n =@ term_int arr_length)
-      (get_term_from_expr 0 symbols n e1)
+      (get_term_from_expr_rec e1)
       (get_term_from_expr (arr_length + 1) symbols n e2)
   | TE_pre e -> begin
     match e.texpr_desc with
     | TE_ident { name; _ } -> term_app (Hashtbl.find symbols name) (n -@ term_1)
-    | _ -> assert false (*Le noeud doit être "pre"-normalisé*)
+    | _ -> assert false (* Le noeud doit être "pre-normalisé" *)
   end
-  | TE_tuple _ -> assert false
-  | TE_app _ -> assert false
-  | TE_prim _ -> assert false
+  | TE_tuple _ | TE_app _ | TE_prim _ -> assert false
   | TE_op _ ->
     Format.printf "Clash on this expression :@.";
     Typed_ast_printer.print_exp Format.std_formatter expr;
@@ -157,9 +168,7 @@ and get_term_from_binop symbols n binop es =
   binop t1 t2
 
 
-(* Obtient une definition pour le SMT à partir d'un ensemble d'équations
-   Pré-condition : ne pas avoir de tuples dans les équations
-*)
+(* Obtient une definition pour le SMT à partir d'un ensemble d'équations *)
 let get_def_from_eqs state_vars symbols aux eqs =
   let defs =
     List.map
@@ -178,7 +187,6 @@ let get_def_from_eqs state_vars symbols aux eqs =
         fun n ->
          let aux_def = term_app symbol n =@ term_true in
          let expr_def = get_formula_from_expr symbols n expr in
-
          formula_imp aux_def expr_def &&@ formula_imp expr_def aux_def
       end
       aux
@@ -204,7 +212,7 @@ let get_def_from_eqs state_vars symbols aux eqs =
   (delta, init)
 
 
-(* Renvoie les symboles à paritr des variables *)
+(* Renvoie les symboles à partir des variables *)
 let get_symbol_from_var_names symbols var_names =
   List.map (fun name -> Hashtbl.find symbols name) var_names
 
@@ -306,7 +314,7 @@ let cnk n delta k state_symbols init =
 
 (* ===== CAS DE BASE ===== *)
 
-(* Solveur cas de base k-inductif (a k fixe) *)
+(* Solveur cas de base k-inductif (k fixé) *)
 let get_base_case_k_inductive delta p k =
   let assume = BMC_solver.assume ~id:k in
   let entails = BMC_solver.entails ~id:k in
@@ -323,23 +331,18 @@ let get_base_case_k_inductive delta p k =
   done;
   check ();
 
-  let final_p =
-    match k with
-    | 1 -> p term_0
-    | _ -> formula_ands (List.init (k + 1) (fun i -> p (term_int i)))
-  in
+  let final_p = formula_ands (List.init (k + 1) (fun i -> p (term_int i))) in
   if debug then begin
     Format.printf "final_p =\n\t%!";
     formula_print final_p;
     Format.printf "\n\n%!"
   end;
-
   entails final_p
 
 
 (* ===== CAS INDUCTIF ===== *)
 
-(* Cas inductif pour k-induction (a k fixe) *)
+(* Cas inductif pour k-induction (k fixé) *)
 let get_ind_case_k_inductive delta init state_symbols p k =
   let assume = IND_solver.assume ~id:k in
   let entails = IND_solver.entails ~id:k in
@@ -410,9 +413,9 @@ let get_ind_case_k_inductive delta init state_symbols p k =
 
 
 let check_no_loop_path state_symbols init delta k =
-  let assume = IND_solver.assume ~id:(1000 + k) in
-  let entails = IND_solver.entails ~id:(1000 + k) in
-  let check = IND_solver.check in
+  let assume = NLP_solver.assume ~id:k in
+  let entails = NLP_solver.entails ~id:k in
+  let check = NLP_solver.check in
 
   for i = 0 to k + 1 do
     let delta_i = delta (term_int i) in
@@ -428,45 +431,51 @@ let check_no_loop_path state_symbols init delta k =
 
 (* ===== CHECKING ===== *)
 
-let k_loop_compr delta init p k state_symbols =
-  (* assume que _state_symbols est non vide *)
-  for i = 1 to k do
-    Format.printf "Checking k-inductive with loop compression for k=%d@." i;
-    if not (get_base_case_k_inductive delta p i) then begin
-      Format.printf "\027[31mFALSE PROPERTY at base case k=%d\027[0m@." i;
-      exit 0
-    end
-    else if get_ind_case_k_inductive delta init state_symbols p i then begin
-      Format.printf "\027[32mTRUE PROPERTY at k=%d\027[0m@." i;
-      exit 0
-    end
-    else if check_no_loop_path state_symbols init delta i then begin
-      Format.printf
-        "\027[33m TRUE PROPERTY (by loop compression) at k=%d\027[0m@." i;
-      exit 0
-    end
-  done;
-  Format.printf "\027[34mDon't know after k=%d\027[0m@." k
+(* Pour stopper la recherche d'une solution k-inductive *)
+exception Solved
+
+let k_loop_compr delta init p state_symbols =
+  (* assume que state_symbols est non vide *)
+  try
+    for i = 1 to max_int do
+      Format.printf "Checking k-inductive with loop compression for k=%d@." i;
+      if not (get_base_case_k_inductive delta p i) then begin
+        Format.printf "\027[31mFALSE PROPERTY at base case k=%d\027[0m@." i;
+        raise Solved
+      end
+      else if get_ind_case_k_inductive delta init state_symbols p i then begin
+        Format.printf "\027[32mTRUE PROPERTY at k=%d\027[0m@." i;
+        raise Solved
+      end
+      else if check_no_loop_path state_symbols init delta i then begin
+        Format.printf
+          "\027[33m TRUE PROPERTY (by loop compression) at k=%d\027[0m@." i;
+        raise Solved
+      end
+    done;
+    Format.printf "\027[34mDon't know\027[0m@."
+  with Solved -> ()
 
 
-let k_loop delta init p k =
-  for i = 1 to k do
-    Format.printf "Checking k-inductive for k=%d@." i;
-    if not (get_base_case_k_inductive delta p i) then begin
-      Format.printf "\027[31mFALSE PROPERTY at base case k=%d\027[0m@." i;
-      exit 0
-    end
-    else if get_ind_case_k_inductive delta init [] p i then begin
-      Format.printf "\027[32mTRUE PROPERTY at k=%d\027[0m@." i;
-      exit 0
-    end
-  done;
-  Format.printf "\027[34mDon't know after k=%d\027[0m@." k
+let k_loop delta init p =
+  try
+    for i = 1 to max_int do
+      Format.printf "Checking k-inductive for k=%d@." i;
+      if not (get_base_case_k_inductive delta p i) then begin
+        Format.printf "\027[31mFALSE PROPERTY at base case k=%d\027[0m@." i;
+        raise Solved
+      end
+      else if get_ind_case_k_inductive delta init [] p i then begin
+        Format.printf "\027[32mTRUE PROPERTY at k=%d\027[0m@." i;
+        raise Solved
+      end
+    done;
+    Format.printf "\027[34mDon't know\027[0m@."
+  with Solved -> ()
 
 
+(* Effectue la k-induction *)
 let check node =
-  let k = 20 in
-
   let state_vars = get_state_vars_from_node node in
   if debug then
     List.iter (fun v -> Format.printf "State var: %s@." v) state_vars;
@@ -474,5 +483,5 @@ let check node =
   let aux, node = preprocess_node node in
   let delta, p, init, state_symbols = get_defs_from_node state_vars aux node in
 
-  if state_symbols <> [] then k_loop_compr delta init p k state_symbols
-  else k_loop delta init p k
+  if state_symbols <> [] then k_loop_compr delta init p state_symbols
+  else k_loop delta init p
