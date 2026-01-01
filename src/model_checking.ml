@@ -47,11 +47,11 @@ let rec get_term_from_expr arr_length types n expr =
     let t1, t2, t3 = es |> List.map get_term_from_expr_rec |> assume_3 in
     term_ite (t1 =@ term_true) t2 t3
   | TE_prim ({ name; _ }, es) when name = "int_of_real" ->
-    ignore es;
-    failwith "TODO-int_of_real"
+    let t = es |> assume_1 |> get_term_from_expr_rec in
+    t |> term_floor |> term_as_int
   | TE_prim ({ name; _ }, es) when name = "real_of_int" ->
-    ignore es;
-    failwith "TODO-real_of_int"
+    let t = es |> assume_1 |> get_term_from_expr_rec in
+    t |> term_as_real
   | TE_arrow (e1, e2) ->
     term_ite
       (diff_extract n =@ term_int arr_length)

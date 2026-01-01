@@ -172,6 +172,15 @@ let term_ite t1 t2 t3 = Expr.triop type_bool Ty.Triop.Ite t1 t2 t3
 (* Variable v *)
 let term_var v = Expr.symbol v
 
+(* Ré-interprète un reel en un entier *)
+let term_as_int t = Expr.cvtop type_real Ty.Cvtop.Reinterpret_int t
+
+(* Ré-interprète un entier en un reel *)
+let term_as_real t = Expr.cvtop type_int Ty.Cvtop.Reinterpret_float t
+
+(* Floor un reel *)
+let term_floor t = Expr.unop type_real Ty.Unop.Floor t
+
 (* ===== SYMBOLES ===== *)
 
 (* Type pour l'unicité des n + d
