@@ -263,7 +263,7 @@ let rec preprocess_expr ({ texpr_desc; _ } as expr) =
   (aux, { expr with texpr_desc })
 
 
-(* Preprocess une équantion pour créer les expressions auxiliaires *)
+(* Preprocess une équation pour créer les expressions auxiliaires *)
 let preprocess_equ ({ teq_expr; _ } as equ) =
   let aux, teq_expr = preprocess_expr teq_expr in
   (aux, { equ with teq_expr })
@@ -276,6 +276,8 @@ let preprocess_node ({ tn_equs; _ } as node) =
 
 
 (* ===== COMPRESSION DE CHEMINS ===== *)
+
+(* renvoie une formule du SMT qui permet de de contraindre l'absence de deux états identiques aux instants i et j *)
 
 let term_diff_state state_symbols i j =
   match state_symbols with
@@ -296,6 +298,8 @@ let term_diff_state state_symbols i j =
     in
     formula_ors diffs
 
+
+(* compression de chemins, vérifie l'absence de deux états identiques de n à n+k, ainsi que l'absence d'état initiaux dans ce chemin *)
 
 let cnk n delta k state_symbols init =
   let formula = ref formula_true in
@@ -410,6 +414,10 @@ let get_ind_case_k_inductive delta init state_symbols p k =
   entails p_sk
 
 
+(* ===== NO LOOP PATH ===== *)
+
+(* vérifie l'existence d'un chemin sans boucle *)
+
 let check_no_loop_path state_symbols init delta k =
   let assume = NLP_solver.assume ~id:k in
   let entails = NLP_solver.entails ~id:k in
@@ -432,6 +440,7 @@ let check_no_loop_path state_symbols init delta k =
 (* Pour stopper la recherche d'une solution k-inductive *)
 exception Solved
 
+(* Effectue la k-induction avec compression de chemin *)
 let k_loop_compr delta init p state_symbols =
   (* assume que state_symbols est non vide *)
   try
@@ -455,6 +464,7 @@ let k_loop_compr delta init p state_symbols =
   with Solved -> ()
 
 
+(* Effectue la k-induction sans compression de chemin *)
 let k_loop delta init p =
   try
     for i = 1 to max_int do
