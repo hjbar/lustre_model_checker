@@ -1,7 +1,13 @@
-node check () returns (OK : bool);
-var in1, in2 : int;
+node Mod3() returns (a : int);
 let
-  in1 = 3;
-  in2 = 2;
-  OK = ((2 * (in1 + 3) * in2)) mod 6 = 0;
+  a = 0 -> ((pre a + 1) mod 3);
+tel
+
+node check() returns (OK : bool);
+var a : int;
+let
+  a  = Mod3();
+
+  -- Guard the first 3 instants so the property is defined from init
+  OK = true -> true -> true -> (a = pre (pre (pre a)));
 tel

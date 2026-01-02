@@ -199,6 +199,7 @@ let declare_symbol name t_in t_out =
 
 (* Declare un symbole à partir d'une variable *)
 let get_symbol_from_var ({ name; _ }, ty) =
+  let name = fresh_name ~name () in
   declare_symbol name [ type_int ] (asttype_to_smttype ty)
 
 

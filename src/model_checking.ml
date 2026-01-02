@@ -31,7 +31,7 @@ let rec get_state_vars_from_expr seen state_vars { texpr_desc; _ } =
     match expr.texpr_desc with
     | TE_ident { name; _ } ->
       if not (Hashtbl.mem seen name) then begin
-        Hashtbl.add seen name ();
+        Hashtbl.replace seen name ();
         state_vars := name :: !state_vars
       end
     | _ -> assert false (* Le noeud doit être "pre-normalisé" *)
@@ -223,8 +223,7 @@ let get_symbol_from_var_names symbols var_names =
    La définition delta correspond à la conjonction des définitions des équations du noeud
    La définition p assure qu'on veut que la propriété OK soit vraie
 *)
-let get_defs_from_node state_vars aux ({ tn_equs; _ } as node) =
-  let symbols = get_symbols_from_node aux node in
+let get_defs_from_node symbols state_vars aux { tn_equs; _ } =
   let state_symbols = get_symbol_from_var_names symbols state_vars in
   let delta_def, init = get_def_from_eqs state_vars symbols aux tn_equs in
   let p_def n = term_app (Hashtbl.find symbols "OK") n =@ term_true in
@@ -348,9 +347,8 @@ let get_ind_case_k_inductive delta init state_symbols p k =
   let entails = IND_solver.entails ~id:k in
   let check = IND_solver.check in
 
-  let n =
-    term_app_unit (declare_symbol ("n_k_" ^ string_of_int k) [] type_int)
-  in
+  let n_name = fresh_name ~name:("n_k_" ^ string_of_int k) () in
+  let n = term_app_unit (declare_symbol n_name [] type_int) in
 
   let cond = term_0 <=@ n in
   let delta_n = delta n in
@@ -481,7 +479,17 @@ let check node =
     List.iter (fun v -> Format.printf "State var: %s@." v) state_vars;
 
   let aux, node = preprocess_node node in
-  let delta, p, init, state_symbols = get_defs_from_node state_vars aux node in
+  let symbols = get_symbols_from_node aux node in
+  let delta, p, init, state_symbols =
+    get_defs_from_node symbols state_vars aux node
+  in
 
-  if state_symbols <> [] then k_loop_compr delta init p state_symbols
-  else k_loop delta init p
+  if state_symbols = [] then k_loop delta init p
+  else
+    try k_loop_compr delta init p state_symbols
+    with Aez.Smt.Unsat _ ->
+      BMC_solver.clear ();
+      IND_solver.clear ();
+      NLP_solver.clear ();
+      get_symbols_from_node aux node |> ignore;
+      k_loop delta init p
