@@ -278,7 +278,6 @@ let preprocess_node ({ tn_equs; _ } as node) =
 (* ===== COMPRESSION DE CHEMINS ===== *)
 
 (* renvoie une formule du SMT qui permet de de contraindre l'absence de deux états identiques aux instants i et j *)
-
 let term_diff_state state_symbols i j =
   match state_symbols with
   | [] -> assert false
@@ -300,7 +299,6 @@ let term_diff_state state_symbols i j =
 
 
 (* compression de chemins, vérifie l'absence de deux états identiques de n à n+k, ainsi que l'absence d'état initiaux dans ce chemin *)
-
 let cnk n delta k state_symbols init =
   let formula = ref formula_true in
   for i = 0 to k do
