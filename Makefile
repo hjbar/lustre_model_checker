@@ -9,9 +9,6 @@ format:
 build:
 	@dune build
 
-fullclean: clean
-	@rm -rf lib/aez
-
 examples: all clear
 	@cd examples && make -s
 
